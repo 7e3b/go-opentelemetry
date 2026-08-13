@@ -5,7 +5,7 @@ A unified Go package for structured logging with OpenTelemetry integration, comb
 ## Installation
 
 ```bash
-go get github.com/gokpm/go-sig
+go get github.com/7e3b/go-sig
 ```
 
 ## Usage
@@ -20,10 +20,10 @@ import (
     "os"
     "time"
     
-    "github.com/gokpm/go-sig"
-    "github.com/gokpm/go-log"
-    "github.com/gokpm/go-trace"
-    "github.com/gokpm/go-metric"
+    "github.com/7e3b/go-sig"
+    "github.com/7e3b/go-log"
+    "github.com/7e3b/go-trace"
+    "github.com/7e3b/go-metric"
 )
 
 func setup() error {

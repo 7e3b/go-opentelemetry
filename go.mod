@@ -1,4 +1,4 @@
-module github.com/gokpm/go-sig
+module github.com/7e3b/go-otel
 
 go 1.24.4
 
