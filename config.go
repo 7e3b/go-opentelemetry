@@ -17,34 +17,115 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 )
 
+// ErrInvalidSeverity indicates that LoggerConfig.Severity contains an
+// unsupported severity value.
 var ErrInvalidSeverity = errors.New("invalid severity")
 
+// Config configures the OpenTelemetry client.
+//
+// A Config controls service identity, OTLP export settings, and the
+// individual tracing, logging, and metrics providers.
+//
+// Create the Client once during application startup and reuse it throughout
+// the application.
 type Config struct {
-	Name            string
-	Namespace       string
-	Environment     string
-	Version         string
-	InstanceID      string
-	Endpoint        string
-	Insecure        bool
+	// Name identifies the service emitting telemetry.
+	//
+	// This value is used as the OpenTelemetry service.name resource attribute.
+	Name string
+
+	// Namespace identifies the logical namespace of the service.
+	Namespace string
+
+	// Environment identifies the deployment environment, such as
+	// "development", "staging", or "production".
+	Environment string
+
+	// Version identifies the version of the running service.
+	Version string
+
+	// InstanceID identifies the specific running instance of the service.
+	//
+	// In a containerized environment this can be set to a pod, task, or
+	// other instance identifier.
+	InstanceID string
+
+	// Endpoint specifies the OTLP HTTP endpoint used to export telemetry.
+	//
+	// The configured endpoint is used by the enabled tracing, logging,
+	// and metrics exporters.
+	Endpoint string
+
+	// Insecure disables TLS when communicating with the OTLP endpoint.
+	//
+	// This is generally useful for local development or environments where
+	// the collector endpoint does not require TLS.
+	Insecure bool
+
+	// WithoutMetadata disables automatic source-code metadata.
+	//
+	// When metadata is enabled, telemetry includes the source file,
+	// function, and line number associated with the operation.
+	//
+	// Disabling metadata can reduce runtime overhead and telemetry volume.
 	WithoutMetadata bool
-	Tracer          TracerConfig
-	Meter           MeterConfig
-	Logger          LoggerConfig
+
+	// Tracer configures distributed tracing.
+	Tracer TracerConfig
+
+	// Meter configures metrics collection.
+	Meter MeterConfig
+
+	// Logger configures structured logging.
+	Logger LoggerConfig
 }
 
+// TracerConfig configures distributed tracing.
 type TracerConfig struct {
+	// SamplingRatio specifies the proportion of traces to sample.
+	//
+	// For example:
+	//
+	//	1.0  - sample all traces
+	//	0.1  - sample approximately 10% of traces
+	//
+	// A value greater than zero enables tracing.
 	SamplingRatio float64
 }
 
+// MeterConfig configures metrics collection.
 type MeterConfig struct {
+	// Enabled determines whether metrics collection is enabled.
 	Enabled bool
 }
 
+// LoggerConfig configures structured logging.
 type LoggerConfig struct {
+	// Severity specifies the minimum severity exported by the logger.
+	//
+	// Supported values are:
+	//
+	//	trace
+	//	debug
+	//	info
+	//	warn
+	//	error
+	//	fatal
+	//
+	// An empty value disables logging.
 	Severity string
 }
 
+// Client initializes the OpenTelemetry client using the supplied
+// configuration.
+//
+// Only the telemetry providers enabled by the configuration are initialized.
+//
+// The returned Client should be shared across the application rather than
+// creating a new client for each request or operation.
+//
+// Call Client.Shutdown during application shutdown to flush pending
+// telemetry.
 func (config Config) Client(ctx context.Context) (Client, error) {
 	resource, err := config.resource()
 	if err != nil {
@@ -191,6 +272,9 @@ func (config Config) tracer(ctx context.Context, resource *resource.Resource) (*
 	tracer := &tracer{}
 	tracer.provider = sdkTrace.NewTracerProvider(providerOpts...)
 	tracer.tracer = tracer.provider.Tracer(config.Name)
-	tracer.propagator = propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{})
+	tracer.propagator = propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{},
+		propagation.Baggage{},
+	)
 	return tracer, nil
 }

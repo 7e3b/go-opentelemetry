@@ -12,13 +12,44 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+// Span represents a unit of work within a distributed trace.
+//
+// A Span also provides structured logging methods. Logs emitted through a
+// Span are associated with the Span's trace context, allowing logs and traces
+// to be correlated in an observability backend.
+//
+// A Span should normally be ended exactly once using defer immediately after
+// it is created.
 type Span interface {
+	// End completes the span.
+	//
+	// End should normally be called using:
+	//
+	//	span := client.Start(ctx)
+	//	defer span.End()
 	End()
+
+	// Trace records a trace-level diagnostic event.
 	Trace(string, ...map[string]any)
+
+	// Info records an informational event.
 	Info(string, ...map[string]any)
+
+	// Debug records a debug-level diagnostic event.
 	Debug(string, ...map[string]any)
+
+	// Warn records a warning event.
 	Warn(string, ...map[string]any)
+
+	// Error records an error event and marks the associated span as failed.
+	//
+	// A nil error is ignored.
 	Error(error, ...map[string]any)
+
+	// Fatal records a fatal error event and marks the associated span as failed.
+	//
+	// A nil error is ignored. This method records telemetry but does not
+	// terminate the application.
 	Fatal(error, ...map[string]any)
 }
 

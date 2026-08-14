@@ -5,10 +5,76 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/sdk/trace"
 )
 
+// Client provides application-level access to OpenTelemetry tracing,
+// structured logging, metrics, and trace-context propagation.
+//
+// A Client should normally be created once during application startup and
+// reused throughout the lifetime of the application.
 type Client interface {
+	// Start starts a span using the calling function as the span name.
+	//
+	// The optional attributes are attached to the span and to log records
+	// emitted through the returned Span.
+	//
+	// The returned Span should normally be ended using defer:
+	//
+	//	span := client.Start(ctx)
+	//	defer span.End()
+	Start(context.Context, ...map[string]any) Span
+
+	// StartWithName starts a span with an explicitly specified name.
+	//
+	// Use this when the logical operation name should differ from the
+	// calling function name.
+	//
+	// Optional attributes are attached to the span and to log records
+	// emitted through the returned Span.
+	StartWithName(context.Context, string, ...map[string]any) Span
+
+	// Shutdown flushes pending telemetry and shuts down all enabled
+	// OpenTelemetry providers.
+	//
+	// Shutdown should be called during graceful application shutdown.
 	Shutdown(context.Context) error
+
+	// Propagator returns the OpenTelemetry text-map propagator used by
+	// the client.
+	//
+	// Use the propagator to inject trace context into outbound requests
+	// and extract trace context from inbound requests when integrating
+	// with transports that are not automatically instrumented.
+	//
+	// Propagator returns nil when tracing is disabled.
+	Propagator() propagation.TextMapPropagator
+
+	// WithNewTimeout creates a new context with the specified timeout while
+	// preserving the OpenTelemetry trace context from the supplied context.
+	//
+	// This is useful when a new timeout or cancellation boundary is required
+	// without losing the current distributed trace context.
+	//
+	// The returned CancelFunc must be called when the context is no longer
+	// needed.
+	WithNewTimeout(context.Context, time.Duration) (context.Context, context.CancelFunc)
+
+	// WithoutTimeout creates a new context without inheriting the deadline
+	// or cancellation of the supplied context while preserving its
+	// OpenTelemetry trace context.
+	//
+	// This can be used when work must continue independently of the lifetime
+	// of the original request context while remaining part of the same trace.
+	WithoutTimeout(context.Context) context.Context
+
+	// TraceProvider returns the underlying OpenTelemetry SDK tracer provider.
+	//
+	// Use this only when direct access to the OpenTelemetry SDK is required,
+	// such as integrating with a library that accepts a *trace.TracerProvider.
+	//
+	// TraceProvider returns nil when tracing is disabled.
+	TraceProvider() *trace.TracerProvider
 }
 
 type client struct {
@@ -56,6 +122,14 @@ func (client *client) StartWithName(ctx context.Context, name string, extras ...
 	}
 	span.startWithName(ctx, name, extras...)
 	return span
+}
+
+func (client *client) TraceProvider() *trace.TracerProvider {
+	tracer := client.tracer
+	if client.tracer == nil {
+		return nil
+	}
+	return tracer.provider
 }
 
 func (client *client) Propagator() propagation.TextMapPropagator {
