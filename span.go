@@ -131,6 +131,16 @@ func (span *span) startWithName(ctx context.Context, name string, extras ...map[
 			attributes = append(attributes, attribute.String(key, fmt.Sprint(value)))
 		}
 	}
+	if client.metadata {
+		var line int
+		span.file, span.function, line = meta()
+		attributes = append(
+			attributes,
+			attribute.String("file", span.file),
+			attribute.String("function", span.function),
+			attribute.Int("line", line),
+		)
+	}
 	tracer := client.tracer
 	if tracer != nil {
 		span.ctx, span.span = tracer.tracer.Start(
