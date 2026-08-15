@@ -114,7 +114,7 @@ The following configuration fields are mapped to OpenTelemetry resource attribut
 | `Version`     | `service.version`             |
 | `InstanceID`  | `service.instance.id`         |
 | `Environment` | `deployment.environment.name` |
-| Hostname      | `host.name`                   |
+| `Hostname`    | `host.name`                   |
 
 `InstanceID` and `HostName` represent different concepts. `InstanceID` identifies the specific service instance, while `HostName` is automatically obtained from the operating system.
 
