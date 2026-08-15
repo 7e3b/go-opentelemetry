@@ -1,4 +1,4 @@
-package opentelemetry
+package otel
 
 import (
 	"context"
@@ -20,6 +20,29 @@ import (
 // ErrInvalidSeverity indicates that LoggerConfig.Severity contains an
 // unsupported severity value.
 var ErrInvalidSeverity = errors.New("invalid severity")
+
+const (
+	// SeverityTrace represents trace-level logging.
+	SeverityTrace = "trace"
+
+	// SeverityDebug represents debug-level logging.
+	SeverityDebug = "debug"
+
+	// SeverityInfo represents informational logging.
+	SeverityInfo = "info"
+
+	// SeverityWarn represents warning-level logging.
+	SeverityWarn = "warn"
+
+	// SeverityError represents error-level logging.
+	SeverityError = "error"
+
+	// SeverityFatal represents fatal-level logging.
+	//
+	// Fatal severity records a critical error but does not terminate the
+	// application.
+	SeverityFatal = "fatal"
+)
 
 // Config configures the OpenTelemetry client.
 //
@@ -181,17 +204,17 @@ func (config Config) resource() (*resource.Resource, error) {
 
 func parseSeverity(severity string) log.Severity {
 	switch severity {
-	case "trace":
+	case SeverityTrace:
 		return log.SeverityTrace
-	case "debug":
+	case SeverityDebug:
 		return log.SeverityDebug
-	case "info":
+	case SeverityInfo:
 		return log.SeverityInfo
-	case "warn":
+	case SeverityWarn:
 		return log.SeverityWarn
-	case "error":
+	case SeverityError:
 		return log.SeverityError
-	case "fatal":
+	case SeverityFatal:
 		return log.SeverityFatal
 	default:
 		return log.SeverityUndefined

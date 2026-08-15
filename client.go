@@ -1,4 +1,4 @@
-package opentelemetry
+package otel
 
 import (
 	"context"
@@ -14,25 +14,20 @@ import (
 // A Client should normally be created once during application startup and
 // reused throughout the lifetime of the application.
 type Client interface {
-	// Start starts a span using the calling function as the span name.
+	// Start starts a new span using the supplied context.
 	//
-	// The optional attributes are attached to the span and to log records
-	// emitted through the returned Span.
+	// Span configuration can be supplied through SpanConfig. Attributes
+	// configured on the span are also attached to log records emitted
+	// through the returned Span.
+	//
+	// When the span name is not explicitly specified, the client derives
+	// the name from the calling operation.
 	//
 	// The returned Span should normally be ended using defer:
 	//
 	//	span := client.Start(ctx)
 	//	defer span.End()
-	Start(context.Context, ...map[string]any) Span
-
-	// StartWithName starts a span with an explicitly specified name.
-	//
-	// Use this when the logical operation name should differ from the
-	// calling function name.
-	//
-	// Optional attributes are attached to the span and to log records
-	// emitted through the returned Span.
-	StartWithName(context.Context, string, ...map[string]any) Span
+	Start(context.Context, ...SpanConfig) Span
 
 	// Shutdown flushes pending telemetry and shuts down all enabled
 	// OpenTelemetry providers.
@@ -106,21 +101,12 @@ func (client *client) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-func (client *client) Start(ctx context.Context, extras ...map[string]any) Span {
+func (client *client) Start(ctx context.Context, config ...SpanConfig) Span {
 	span := &span{ctx: ctx, client: client}
 	if client.tracer == nil && client.logger == nil {
 		return span
 	}
-	span.start(ctx, extras...)
-	return span
-}
-
-func (client *client) StartWithName(ctx context.Context, name string, extras ...map[string]any) Span {
-	span := &span{ctx: ctx, client: client}
-	if client.tracer == nil && client.logger == nil {
-		return span
-	}
-	span.startWithName(ctx, name, extras...)
+	span.start(ctx, config...)
 	return span
 }
 

@@ -1,4 +1,4 @@
-package opentelemetry
+package otel
 
 import (
 	"context"
@@ -79,14 +79,71 @@ func meta() (string, string, int) {
 	return file, runtime.FuncForPC(pc).Name(), line
 }
 
-func (span *span) start(ctx context.Context, extras ...map[string]any) {
+// SpanConfig configures a span created by Client.Start.
+type SpanConfig struct {
+	// Name specifies the span name.
+	//
+	// When empty, the client derives the name from the calling function if the client was configured with metadata.
+	Name string
+
+	// Kind specifies the OpenTelemetry span kind.
+	//
+	// Supported values are KindInternal, KindServer, KindClient,
+	// KindProducer, and KindConsumer.
+	//
+	// An empty value leaves the span kind unspecified.
+	Kind string
+
+	// Attributes specifies attributes to attach to the span.
+	//
+	// Attribute values are converted to strings before being attached.
+	Attributes map[string]any
+}
+
+const (
+	// KindInternal identifies an internal operation within an application.
+	KindInternal = "internal"
+
+	// KindServer identifies a span representing a request received by a service.
+	KindServer = "server"
+
+	// KindClient identifies a span representing an outbound request to another service.
+	KindClient = "client"
+
+	// KindProducer identifies a span representing message production.
+	KindProducer = "producer"
+
+	// KindConsumer identifies a span representing message consumption.
+	KindConsumer = "consumer"
+)
+
+func parseKind(kind string) trace.SpanKind {
+	switch kind {
+	case KindInternal:
+		return trace.SpanKindInternal
+	case KindServer:
+		return trace.SpanKindServer
+	case KindClient:
+		return trace.SpanKindClient
+	case KindProducer:
+		return trace.SpanKindProducer
+	case KindConsumer:
+		return trace.SpanKindConsumer
+	default:
+		return trace.SpanKindUnspecified
+	}
+}
+
+func (span *span) start(ctx context.Context, configs ...SpanConfig) {
 	now := time.Now()
 	client := span.client
 	attributes := []attribute.KeyValue{}
-	for _, object := range extras {
-		for key, value := range object {
-			attributes = append(attributes, attribute.String(key, fmt.Sprint(value)))
-		}
+	config := SpanConfig{}
+	if len(configs) > 0 {
+		config = configs[0]
+	}
+	for key, value := range config.Attributes {
+		attributes = append(attributes, attribute.String(key, fmt.Sprint(value)))
 	}
 	if client.metadata {
 		var line int
@@ -97,57 +154,25 @@ func (span *span) start(ctx context.Context, extras ...map[string]any) {
 			attribute.String("function", span.function),
 			attribute.Int("line", line),
 		)
+	}
+	if config.Name != "" {
+		span.name = config.Name
+	} else {
 		span.name = span.function
 	}
 	tracer := client.tracer
 	if tracer != nil {
-		span.ctx, span.span = tracer.tracer.Start(
-			ctx,
-			span.name,
+		opts := []trace.SpanStartOption{
 			trace.WithTimestamp(now),
 			trace.WithAttributes(attributes...),
-		)
-	}
-	logger := client.logger
-	if logger != nil {
-		record := log.Record{}
-		record.SetBody(attribute.StringValue("started"))
-		record.SetTimestamp(now)
-		record.SetObservedTimestamp(now)
-		record.SetSeverity(log.SeverityTrace)
-		record.SetSeverityText(log.SeverityTrace.String())
-		record.AddAttributes(attributes...)
-		logger.logger.Emit(span.ctx, record)
-	}
-}
-
-func (span *span) startWithName(ctx context.Context, name string, extras ...map[string]any) {
-	now := time.Now()
-	client := span.client
-	span.name = name
-	attributes := []attribute.KeyValue{}
-	for _, object := range extras {
-		for key, value := range object {
-			attributes = append(attributes, attribute.String(key, fmt.Sprint(value)))
 		}
-	}
-	if client.metadata {
-		var line int
-		span.file, span.function, line = meta()
-		attributes = append(
-			attributes,
-			attribute.String("file", span.file),
-			attribute.String("function", span.function),
-			attribute.Int("line", line),
-		)
-	}
-	tracer := client.tracer
-	if tracer != nil {
+		if config.Kind != "" {
+			opts = append(opts, trace.WithSpanKind(parseKind(config.Kind)))
+		}
 		span.ctx, span.span = tracer.tracer.Start(
 			ctx,
 			span.name,
-			trace.WithTimestamp(now),
-			trace.WithAttributes(attributes...),
+			opts...,
 		)
 	}
 	logger := client.logger
