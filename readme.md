@@ -1,4 +1,4 @@
-# go-otel
+# go-otx
 
 A lightweight Go wrapper around [OpenTelemetry](https://opentelemetry.io/) providing a unified API for **distributed tracing, structured logging, metrics, and trace-context propagation**.
 
@@ -22,84 +22,112 @@ The package provides a simple application-level telemetry client while retaining
 ## Installation
 
 ```bash
-go get github.com/7e3b/go-otel
+go get github.com/7e3b/go-otx
 ```
 
-## Quick Start
+## Initialization
 
-Create a single `Client` during application startup and reuse it throughout the application.
+There are two ways to initialize `go-otx`.
+
+### Client-based
+
+Use `Config.Client()` when you want to explicitly pass a telemetry client through your application.
 
 ```go
-package main
+client, err := (otx.Config{
+    Name:        "my-service",
+    Namespace:   "my-application",
+    Environment: "production",
+    Version:     "1.0.0",
+    InstanceID:  "instance-1",
+    Endpoint:    "localhost:4318",
 
-import (
-	"context"
-	"log"
+    Tracer: otx.TracerConfig{
+        SamplingRatio: 1.0,
+    },
 
-	otel "github.com/7e3b/go-otel"
-)
+    Logger: otx.LoggerConfig{
+        Severity: otx.SeverityInfo,
+    },
 
-func main() {
-	ctx := context.Background()
+    Meter: otx.MeterConfig{
+        Enabled: true,
+    },
+}).Client(ctx)
 
-	client, err := (otel.Config{
-		Name:        "my-service",
-		Namespace:   "my-application",
-		Environment: "production",
-		Version:     "1.0.0",
-		InstanceID:  "instance-1",
-		Endpoint:    "localhost:4318",
-
-		Tracer: otel.TracerConfig{
-			SamplingRatio: 1.0,
-		},
-
-		Logger: otel.LoggerConfig{
-			Severity: otel.SeverityInfo,
-		},
-
-		Meter: otel.MeterConfig{
-			Enabled: true,
-		},
-	}).Client(ctx)
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	defer client.Shutdown(ctx)
-
-	span := client.Start(ctx)
-	defer span.End()
-
-	span.Info("processing request")
+if err != nil {
+    log.Fatal(err)
 }
+
+defer client.Shutdown(ctx)
 ```
+
+The returned `Client` should normally be created once during application startup and reused throughout the application.
+
+### Package-level
+
+Use `Config.Connect()` when you want to configure a global telemetry client and use the package-level functions.
+
+```go
+err := (otx.Config{
+    Name:        "my-service",
+    Namespace:   "my-application",
+    Environment: "production",
+    Version:     "1.0.0",
+    InstanceID:  "instance-1",
+    Endpoint:    "localhost:4318",
+
+    Tracer: otx.TracerConfig{
+        SamplingRatio: 1.0,
+    },
+
+    Logger: otx.LoggerConfig{
+        Severity: otx.SeverityInfo,
+    },
+
+    Meter: otx.MeterConfig{
+        Enabled: true,
+    },
+}).Connect(ctx)
+
+if err != nil {
+    log.Fatal(err)
+}
+
+defer otx.Shutdown(ctx)
+```
+
+`Config.Connect()` must complete successfully before using the package-level functions:
+
+* `otx.Start`
+* `otx.Shutdown`
+* `otx.WithNewTimeout`
+* `otx.WithoutTimeout`
 
 ## Configuration
 
 `Config` controls service identity and the telemetry providers.
 
 ```go
-otel.Config{
-	Name:        "my-service",
-	Namespace:   "my-application",
-	Environment: "production",
-	Version:     "1.0.0",
-	InstanceID:  "instance-1",
-	Endpoint:    "localhost:4318",
+otx.Config{
+    Name:        "my-service",
+    Namespace:   "my-application",
+    Environment: "production",
+    Version:     "1.0.0",
+    InstanceID:  "instance-1",
+    Endpoint:    "localhost:4318",
 
-	Tracer: otel.TracerConfig{
-		SamplingRatio: 1.0,
-	},
+    Tracer: otx.TracerConfig{
+        SamplingRatio: 1.0,
+    },
 
-	Logger: otel.LoggerConfig{
-		Severity: otel.SeverityInfo,
-	},
+    Logger: otx.LoggerConfig{
+        Severity: otx.SeverityInfo,
+    },
 
-	Meter: otel.MeterConfig{
-		Enabled: true,
-	},
+    Meter: otx.MeterConfig{
+        Enabled: true,
+    },
 }
 ```
 
@@ -133,9 +161,9 @@ The same endpoint is used by the enabled tracing, logging, and metrics exporters
 For a local collector that does not use TLS:
 
 ```go
-otel.Config{
-	Endpoint: "localhost:4318",
-	Insecure: true,
+otx.Config{
+    Endpoint: "localhost:4318",
+    Insecure: true,
 }
 ```
 
@@ -143,8 +171,17 @@ otel.Config{
 
 ### Starting a Span
 
+Using an explicit client:
+
 ```go
 span := client.Start(ctx)
+defer span.End()
+```
+
+Using the package-level API:
+
+```go
+span := otx.Start(ctx)
 defer span.End()
 ```
 
@@ -155,8 +192,8 @@ A span represents a unit of work within a distributed trace.
 A span name can be explicitly provided:
 
 ```go
-span := client.Start(ctx, otel.SpanConfig{
-	Name: "process-user",
+span := client.Start(ctx, otx.SpanConfig{
+    Name: "process-user",
 })
 defer span.End()
 ```
@@ -168,13 +205,13 @@ When no name is provided, the client derives the name from the operation's sourc
 Attributes can be supplied when the span is created:
 
 ```go
-span := client.Start(ctx, otel.SpanConfig{
-	Name: "process-user",
-	Attributes: map[string]any{
-		"user.id":    userID,
-		"user.type":  "premium",
-		"request.id": requestID,
-	},
+span := client.Start(ctx, otx.SpanConfig{
+    Name: "process-user",
+    Attributes: map[string]any{
+        "user.id":    userID,
+        "user.type":  "premium",
+        "request.id": requestID,
+    },
 })
 defer span.End()
 ```
@@ -186,19 +223,19 @@ These attributes are attached to the span and are also available on log records 
 The package supports the standard OpenTelemetry span kinds:
 
 ```go
-otel.KindInternal
-otel.KindServer
-otel.KindClient
-otel.KindProducer
-otel.KindConsumer
+otx.KindInternal
+otx.KindServer
+otx.KindClient
+otx.KindProducer
+otx.KindConsumer
 ```
 
 For example, an outbound database or HTTP operation can be represented as a client span:
 
 ```go
-span := client.Start(ctx, otel.SpanConfig{
-	Name: "postgres.query",
-	Kind: otel.KindClient,
+span := client.Start(ctx, otx.SpanConfig{
+    Name: "postgres.query",
+    Kind: otx.KindClient,
 })
 defer span.End()
 ```
@@ -219,19 +256,19 @@ span.Error(err)
 Supported severities are:
 
 ```go
-otel.SeverityTrace
-otel.SeverityDebug
-otel.SeverityInfo
-otel.SeverityWarn
-otel.SeverityError
-otel.SeverityFatal
+otx.SeverityTrace
+otx.SeverityDebug
+otx.SeverityInfo
+otx.SeverityWarn
+otx.SeverityError
+otx.SeverityFatal
 ```
 
 Configure the minimum exported severity:
 
 ```go
-Logger: otel.LoggerConfig{
-	Severity: otel.SeverityInfo,
+Logger: otx.LoggerConfig{
+    Severity: otx.SeverityInfo,
 },
 ```
 
@@ -243,11 +280,11 @@ Additional attributes can be attached to individual log records:
 
 ```go
 span.Info(
-	"user authenticated",
-	map[string]any{
-		"user.id":     userID,
-		"auth.method": "otp",
-	},
+    "user authenticated",
+    map[string]any{
+        "user.id":     userID,
+        "auth.method": "otp",
+    },
 )
 ```
 
@@ -257,8 +294,8 @@ Use `Error` when an error is available:
 
 ```go
 if err != nil {
-	span.Error(err)
-	return err
+    span.Error(err)
+    return err
 }
 ```
 
@@ -268,11 +305,11 @@ Additional attributes can also be provided:
 
 ```go
 span.Error(
-	err,
-	map[string]any{
-		"user.id":   userID,
-		"operation": "database.query",
-	},
+    err,
+    map[string]any{
+        "user.id":   userID,
+        "operation": "database.query",
+    },
 )
 ```
 
@@ -280,7 +317,7 @@ span.Error(
 
 `Fatal` records an event at fatal severity and marks the span as failed.
 
-It does **not** terminate the application:
+It **does not** terminate the application:
 
 ```go
 span.Fatal(err)
@@ -294,11 +331,11 @@ This allows an observability backend such as SigNoz to correlate logs with trace
 
 ```text
 Trace
- └── Span
-      ├── Log: request received
-      ├── Log: database query
-      ├── Log: cache miss
-      └── Log: request completed
+└── Span
+    ├── Log: request received
+    ├── Log: database query
+    ├── Log: cache miss
+    └── Log: request completed
 ```
 
 This makes it possible to navigate from a trace to the logs generated during that operation.
@@ -324,8 +361,8 @@ line:     42
 To disable metadata collection:
 
 ```go
-otel.Config{
-	WithoutMetadata: true,
+otx.Config{
+    WithoutMetadata: true,
 }
 ```
 
@@ -357,7 +394,10 @@ client.Propagator().Inject(ctx, carrier)
 Incoming trace context can similarly be extracted:
 
 ```go
-ctx = client.Propagator().Extract(ctx, propagation.HeaderCarrier(req.Header))
+ctx = client.Propagator().Extract(
+    ctx,
+    propagation.HeaderCarrier(req.Header),
+)
 ```
 
 This allows traces to continue across service boundaries.
@@ -366,12 +406,23 @@ This allows traces to continue across service boundaries.
 
 The client provides utilities for creating contexts that preserve OpenTelemetry propagation information.
 
+These utilities are also available through the package-level API after `Config.Connect()` has completed successfully.
+
 ### WithNewTimeout
 
 Creates a new context with a new timeout without inheriting the cancellation or deadline of the supplied context.
 
+Using a client:
+
 ```go
 ctx, cancel := client.WithNewTimeout(ctx, 30*time.Second)
+defer cancel()
+```
+
+Using the package-level API:
+
+```go
+ctx, cancel := otx.WithNewTimeout(ctx, 30*time.Second)
 defer cancel()
 ```
 
@@ -385,6 +436,12 @@ Creates a context that does not inherit the deadline or cancellation of the orig
 ctx = client.WithoutTimeout(ctx)
 ```
 
+Or:
+
+```go
+ctx = otx.WithoutTimeout(ctx)
+```
+
 The OpenTelemetry trace and baggage propagation information is preserved.
 
 This is useful for background work that should continue after the original request context is cancelled.
@@ -396,8 +453,8 @@ Note that arbitrary values stored in the original `context.Context` are not copi
 Tracing uses a parent-based ratio sampler.
 
 ```go
-Tracer: otel.TracerConfig{
-	SamplingRatio: 0.1,
+Tracer: otx.TracerConfig{
+    SamplingRatio: 0.1,
 },
 ```
 
@@ -415,9 +472,9 @@ Because the sampler is parent-based, child spans follow the sampling decision of
 Metrics can be enabled independently of tracing and logging:
 
 ```go
-Meter: otel.MeterConfig{
-	Enabled: true,
-},
+Meter: otx.MeterConfig{
+    Enabled: true,
+}
 ```
 
 When enabled, the client initializes an OpenTelemetry `MeterProvider` and exports metrics through OTLP/HTTP.
@@ -436,17 +493,33 @@ For example, this can be passed to libraries that accept a `*trace.TracerProvide
 
 ## Graceful Shutdown
 
-Telemetry providers should be flushed and shut down during application shutdown:
+Telemetry providers should be flushed and shut down during application shutdown.
+
+With an explicit client:
 
 ```go
 ctx, cancel := context.WithTimeout(
-	context.Background(),
-	10*time.Second,
+    context.Background(),
+    10*time.Second,
 )
 defer cancel()
 
 if err := client.Shutdown(ctx); err != nil {
-	log.Printf("failed to shutdown telemetry: %v", err)
+    log.Printf("failed to shutdown telemetry: %v", err)
+}
+```
+
+With the package-level client:
+
+```go
+ctx, cancel := context.WithTimeout(
+    context.Background(),
+    10*time.Second,
+)
+defer cancel()
+
+if err := otx.Shutdown(ctx); err != nil {
+    log.Printf("failed to shutdown telemetry: %v", err)
 }
 ```
 
@@ -454,60 +527,93 @@ if err := client.Shutdown(ctx); err != nil {
 
 ## Recommended Application Lifecycle
 
-A typical application should follow this lifecycle:
+### Client-based
+
+A typical application using an explicit `Client` should follow this lifecycle:
 
 ```text
 Application startup
-       │
-       ▼
+        │
+        ▼
 Create Client
-       │
-       ▼
+        │
+        ▼
 Initialize HTTP / DB / Messaging clients
-       │
-       ▼
+        │
+        ▼
 Handle requests
-       │
-       ├── Start Span
-       │      ├── Attributes
-       │      ├── Info / Debug / Warn
-       │      ├── Error
-       │      └── End
-       │
-       ▼
+        │
+        ├── Start Span
+        │      ├── Attributes
+        │      ├── Info / Debug / Warn
+        │      ├── Error
+        │      └── End
+        │
+        ▼
 Application shutdown
-       │
-       ▼
+        │
+        ▼
 Client.Shutdown()
 ```
 
 The telemetry `Client` should normally be created once and reused throughout the application's lifetime.
 
+### Package-level
+
+When using the global API:
+
+```text
+Application startup
+        │
+        ▼
+Config.Connect()
+        │
+        ▼
+Initialize HTTP / DB / Messaging clients
+        │
+        ▼
+Handle requests
+        │
+        ├── otx.Start()
+        │      ├── Attributes
+        │      ├── Info / Debug / Warn
+        │      ├── Error
+        │      └── End
+        │
+        ▼
+Application shutdown
+        │
+        ▼
+otx.Shutdown()
+```
+
+`Config.Connect()` must have completed successfully before any package-level telemetry function is used.
+
 ## Example: Nested Operations
 
 ```go
-func CreateUser(ctx context.Context, client otel.Client) error {
-	span := client.Start(ctx, otel.SpanConfig{
-		Name: "user.create",
-		Kind: otel.KindInternal,
-	})
-	defer span.End()
+func CreateUser(ctx context.Context, client otx.Client) error {
+    span := client.Start(ctx, otx.SpanConfig{
+        Name: "user.create",
+        Kind: otx.KindInternal,
+    })
+    defer span.End()
 
-	span.Info("creating user")
+    span.Info("creating user")
 
-	if err := validateUser(); err != nil {
-		span.Error(err)
-		return err
-	}
+    if err := validateUser(); err != nil {
+        span.Error(err)
+        return err
+    }
 
-	if err := saveUser(ctx); err != nil {
-		span.Error(err)
-		return err
-	}
+    if err := saveUser(ctx); err != nil {
+        span.Error(err)
+        return err
+    }
 
-	span.Info("user created")
+    span.Info("user created")
 
-	return nil
+    return nil
 }
 ```
 
@@ -518,32 +624,76 @@ A downstream operation can create its own child span using the context associate
 For an HTTP server, the request context should first contain the extracted incoming trace context. The request handler can then create a server span:
 
 ```go
-func Handler(ctx context.Context, client otel.Client) error {
-	span := client.Start(ctx, otel.SpanConfig{
-		Name: "GET /users",
-		Kind: otel.KindServer,
-	})
-	defer span.End()
+func Handler(ctx context.Context, client otx.Client) error {
+    span := client.Start(ctx, otx.SpanConfig{
+        Name: "GET /users",
+        Kind: otx.KindServer,
+    })
+    defer span.End()
 
-	span.Info("request received")
+    span.Info("request received")
 
-	// Application logic...
+    // Application logic...
 
-	return nil
+    return nil
 }
 ```
 
 An outbound request can use a client span:
 
 ```go
-span := client.Start(ctx, otel.SpanConfig{
-	Name: "GET users-service",
-	Kind: otel.KindClient,
+span := client.Start(ctx, otx.SpanConfig{
+    Name: "GET users-service",
+    Kind: otx.KindClient,
 })
 defer span.End()
 
 // Inject the trace context into the outbound request.
 ```
+
+## Global API
+
+The package-level API operates on the client configured by `Config.Connect()`.
+
+### Start
+
+```go
+span := otx.Start(ctx)
+defer span.End()
+```
+
+A span configuration can be supplied:
+
+```go
+span := otx.Start(ctx, otx.SpanConfig{
+    Name: "process-user",
+    Kind: otx.KindInternal,
+})
+defer span.End()
+```
+
+### Shutdown
+
+```go
+if err := otx.Shutdown(ctx); err != nil {
+    log.Printf("failed to shutdown telemetry: %v", err)
+}
+```
+
+### WithNewTimeout
+
+```go
+ctx, cancel := otx.WithNewTimeout(ctx, 30*time.Second)
+defer cancel()
+```
+
+### WithoutTimeout
+
+```go
+ctx = otx.WithoutTimeout(ctx)
+```
+
+All package-level functions require a successfully initialized global client through `Config.Connect()`.
 
 ## OpenTelemetry Model
 
@@ -551,23 +701,23 @@ This package follows the OpenTelemetry model while providing a simpler applicati
 
 ```text
 Resource
-  │
-  ├── Service identity
-  ├── Environment
-  ├── Instance
-  └── Host
-       │
-       ├── Traces
-       │    └── Spans
-       │         ├── Attributes
-       │         └── Events
-       │
-       ├── Logs
-       │    ├── Severity
-       │    ├── Body
-       │    └── Attributes
-       │
-       └── Metrics
+│
+├── Service identity
+├── Environment
+├── Instance
+└── Host
+    │
+    ├── Traces
+    │    └── Spans
+    │         ├── Attributes
+    │         └── Events
+    │
+    ├── Logs
+    │    ├── Severity
+    │    ├── Body
+    │    └── Attributes
+    │
+    └── Metrics
 ```
 
 The underlying OpenTelemetry SDK remains accessible when deeper integration is required.

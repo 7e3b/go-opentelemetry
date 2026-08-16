@@ -178,6 +178,49 @@ func (config Config) Client(ctx context.Context) (Client, error) {
 	return client, nil
 }
 
+// Connect initializes and configures the package-level OpenTelemetry client.
+//
+// Connect must be called successfully before using the package-level
+// functions Start, Shutdown, WithNewTimeout, or WithoutTimeout.
+//
+// Only the telemetry providers enabled by the configuration are initialized.
+//
+// Connect is intended to be called during application startup.
+//
+// Call Shutdown during graceful application shutdown to flush pending
+// telemetry and shut down the configured providers.
+func (config Config) Connect(ctx context.Context) (error) {
+	resource, err := config.resource()
+	if err != nil {
+		return err
+	}
+	client := &client{
+		metadata: !config.WithoutMetadata,
+	}
+	if config.Tracer.SamplingRatio > 0 {
+		client.tracer, err = config.tracer(ctx, resource)
+		if err != nil {
+			return err
+		}
+	}
+	if config.Logger.Severity != "" {
+		client.logger, err = config.logger(ctx, resource)
+		if err != nil {
+			return err
+		}
+	}
+	if config.Meter.Enabled {
+		client.meter, err = config.meter(ctx, resource)
+		if err != nil {
+			return err
+		}
+	}
+	mu.Lock()
+	global = client
+	mu.Unlock()
+	return nil
+}
+
 func (config Config) resource() (*resource.Resource, error) {
 	hostName, err := os.Hostname()
 	if err != nil {

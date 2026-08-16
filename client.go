@@ -2,6 +2,7 @@ package otx
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"go.opentelemetry.io/otel/propagation"
@@ -27,6 +28,8 @@ type Client interface {
 	//
 	//	span := client.Start(ctx)
 	//	defer span.End()
+	// At most one SpanConfig should be supplied. If multiple configurations
+	// are supplied, only the first configuration is used.
 	Start(context.Context, ...SpanConfig) Span
 
 	// Shutdown flushes pending telemetry and shuts down all enabled
@@ -70,6 +73,75 @@ type Client interface {
 	//
 	// TraceProvider returns nil when tracing is disabled.
 	TraceProvider() *trace.TracerProvider
+}
+
+var mu = &sync.RWMutex{}
+
+var global Client
+
+// Start starts a new span using the globally configured OpenTelemetry client.
+//
+// Config.Connect must be called successfully before using Start.
+//
+// The returned Span should normally be ended using defer:
+//
+//	span := otx.Start(ctx)
+//	defer span.End()
+//
+// Span configuration can be supplied through SpanConfig.
+// At most one SpanConfig should be supplied. If multiple configurations
+// are supplied, only the first configuration is used.
+func Start(ctx context.Context, config ...SpanConfig) Span {
+	mu.RLock()
+	client := global
+	mu.RUnlock()
+	return client.Start(ctx, config...)
+}
+
+// Shutdown flushes pending telemetry and shuts down all enabled
+// OpenTelemetry providers on the globally configured client.
+//
+// Config.Connect must be called successfully before using Shutdown.
+//
+// Shutdown should be called during graceful application shutdown.
+func Shutdown(ctx context.Context) error {
+	mu.RLock()
+	client := global
+	mu.RUnlock()
+	return client.Shutdown(ctx)
+}
+
+// WithNewTimeout creates a new context with the specified timeout while
+// preserving the OpenTelemetry trace context from the supplied context.
+//
+// Config.Connect must be called successfully before using
+// WithNewTimeout.
+//
+// The returned context does not inherit the deadline or cancellation of
+// the supplied context, but retains its OpenTelemetry trace context.
+//
+// The returned CancelFunc must be called when the context is no longer
+// needed.
+func WithNewTimeout(ctx context.Context, expiry time.Duration) (context.Context, context.CancelFunc) {
+	mu.RLock()
+	client := global
+	mu.RUnlock()
+	return client.WithNewTimeout(ctx, expiry)
+}
+
+// WithoutTimeout creates a new context without inheriting the deadline or
+// cancellation of the supplied context while preserving its OpenTelemetry
+// trace context.
+//
+// Config.Connect must be called successfully before using WithoutTimeout.
+//
+// This is useful when work must continue independently of the lifetime of
+// the original request context while remaining part of the same trace.
+func WithoutTimeout(ctx context.Context) context.Context {
+	mu.RLock()
+	client := global
+	mu.RUnlock()
+	return client.WithoutTimeout(ctx)
 }
 
 type client struct {
