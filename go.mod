@@ -1,4 +1,4 @@
-module github.com/7e3b/go-otel
+module github.com/7e3b/go-otx
 
 go 1.25.4
 
