@@ -189,7 +189,7 @@ func (config Config) Client(ctx context.Context) (Client, error) {
 //
 // Call Shutdown during graceful application shutdown to flush pending
 // telemetry and shut down the configured providers.
-func (config Config) Connect(ctx context.Context) (error) {
+func (config Config) Connect(ctx context.Context) error {
 	resource, err := config.resource()
 	if err != nil {
 		return err
