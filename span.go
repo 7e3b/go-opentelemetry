@@ -134,7 +134,7 @@ func parseKind(kind string) trace.SpanKind {
 	}
 }
 
-func (span *span) start(ctx context.Context, configs ...SpanConfig) {
+func (span *span) start(ctx context.Context, linked bool, configs ...SpanConfig) {
 	now := time.Now()
 	client := span.client
 	attributes := []attribute.KeyValue{}
@@ -168,6 +168,14 @@ func (span *span) start(ctx context.Context, configs ...SpanConfig) {
 		}
 		if config.Kind != "" {
 			opts = append(opts, trace.WithSpanKind(parseKind(config.Kind)))
+		}
+		if linked {
+			ctx := trace.SpanContextFromContext(ctx)
+			opts = append(
+				opts,
+				trace.WithNewRoot(),
+				trace.WithLinks(trace.Link{SpanContext: ctx}),
+			)
 		}
 		span.ctx, span.span = tracer.tracer.Start(
 			ctx,

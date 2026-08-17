@@ -17,6 +17,7 @@ The package provides a simple application-level telemetry client while retaining
 * Service and instance resource attributes
 * Graceful telemetry shutdown
 * Context utilities for independent background work
+* Span links for asynchronous work
 * Access to the underlying OpenTelemetry `TracerProvider`
 
 ## Installation
@@ -144,7 +145,7 @@ The following configuration fields are mapped to OpenTelemetry resource attribut
 | `Environment` | `deployment.environment.name` |
 | `Hostname`    | `host.name`                   |
 
-`InstanceID` and `HostName` represent different concepts. `InstanceID` identifies the specific service instance, while `HostName` is automatically obtained from the operating system.
+`InstanceID` and `Hostname` represent different concepts. `InstanceID` identifies the specific service instance, while `Hostname` is automatically obtained from the operating system.
 
 ### OTLP Endpoint
 
@@ -241,6 +242,76 @@ defer span.End()
 ```
 
 When no kind is specified, the span kind is left unspecified.
+
+## Asynchronous Work and Span Links
+
+When work is passed through an asynchronous system such as a queue, the consumer operation does not naturally execute as a child of the producer span.
+
+For example:
+
+```text
+Producer service
+
+Trace
+└── Span A
+      │
+      └── Queue message
+              │
+              ▼
+        Consumer service
+```
+
+The consumer can use the trace context propagated with the message and create a new span with a link to the producer operation.
+
+Use `Link` for this purpose:
+
+```go
+span := client.Link(ctx, otx.SpanConfig{
+    Name: "process-message",
+    Kind: otx.KindConsumer,
+})
+defer span.End()
+```
+
+A linked span represents a relationship between two operations without making the linked span a direct parent-child descendant.
+
+This is particularly useful for:
+
+* Message queues
+* Event streams
+* Background jobs
+* Batch processing
+* Fan-out processing
+* Work that starts after the original request has completed
+
+### Propagating Queue Context
+
+The producer should inject the current trace context into the message:
+
+```go
+metadata := map[string]string{}
+
+client.Inject(ctx, metadata)
+
+message := Message{
+    Data:     data,
+    Metadata: metadata,
+}
+```
+
+The consumer extracts the context from the message:
+
+```go
+ctx := client.Extract(context.Background(), message.Metadata)
+
+span := client.Link(ctx, otx.SpanConfig{
+    Name: "process-message",
+    Kind: otx.KindConsumer,
+})
+defer span.End()
+```
+
+Using `context.Background()` during extraction intentionally creates a new context that is not tied to the producer's cancellation or deadline while retaining the propagated OpenTelemetry trace context.
 
 ## Structured Logging
 
@@ -346,9 +417,9 @@ Source metadata collection is enabled by default.
 
 Telemetry can include:
 
-* source file
-* function
-* line number
+* Source file
+* Function
+* Line number
 
 For example:
 
@@ -380,6 +451,37 @@ Retrieve the propagator with:
 ```go
 propagator := client.Propagator()
 ```
+
+### Inject
+
+`Inject` places the current trace context into a string map.
+
+```go
+carrier := map[string]string{}
+
+client.Inject(ctx, carrier)
+```
+
+The resulting map can be transported with an outbound message, queue event, or other custom transport.
+
+For example:
+
+```go
+message := Message{
+    Data:     data,
+    Metadata: carrier,
+}
+```
+
+### Extract
+
+`Extract` reads trace context from a string map and returns a context containing the extracted propagation information.
+
+```go
+ctx := client.Extract(context.Background(), carrier)
+```
+
+The returned context can then be used to create spans associated with the propagated trace.
 
 ### HTTP Propagation
 
@@ -651,6 +753,71 @@ defer span.End()
 // Inject the trace context into the outbound request.
 ```
 
+## Example: Queue Producer and Consumer
+
+A common asynchronous flow looks like this:
+
+```text
+HTTP Request
+    │
+    ▼
+Service A
+    │
+    ├── Span A
+    │
+    └── Queue
+          │
+          │ trace context
+          ▼
+      Service B
+          │
+          └── Span B
+               │
+               └── Link → Span A
+```
+
+The producer creates its normal span and injects the context into the message:
+
+```go
+func Publish(ctx context.Context, client otx.Client, data []byte) error {
+    span := client.Start(ctx, otx.SpanConfig{
+        Name: "publish-message",
+        Kind: otx.KindProducer,
+    })
+    defer span.End()
+
+    metadata := map[string]string{}
+    client.Inject(ctx, metadata)
+
+    return queue.Publish(Message{
+        Data:     data,
+        Metadata: metadata,
+    })
+}
+```
+
+The consumer extracts the propagated context and creates a linked consumer span:
+
+```go
+func Consume(message Message, client otx.Client) error {
+    ctx := client.Extract(context.Background(), message.Metadata)
+
+    span := client.Link(ctx, otx.SpanConfig{
+        Name: "process-message",
+        Kind: otx.KindConsumer,
+    })
+    defer span.End()
+
+    // Process message...
+
+    return nil
+}
+```
+
+The consumer does not inherit the producer's cancellation or deadline because the propagated context is extracted into a new `context.Background()`.
+
+This makes the consumer operation independent of the producer's lifetime while retaining the trace relationship.
+
 ## Global API
 
 The package-level API operates on the client configured by `Config.Connect()`.
@@ -710,7 +877,8 @@ Resource
     ├── Traces
     │    └── Spans
     │         ├── Attributes
-    │         └── Events
+    │         ├── Events
+    │         └── Links
     │
     ├── Logs
     │    ├── Severity
