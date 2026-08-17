@@ -201,6 +201,13 @@ func (span *span) start(ctx context.Context, linked bool, configs ...SpanConfig)
 		record.SetSeverityText(log.SeverityTrace.String())
 		record.AddAttributes(attributes...)
 		logger.logger.Emit(span.ctx, record)
+		if logger.console != nil {
+			extras := []any{}
+			for _, attribute := range attributes {
+				extras = append(extras, attribute.Key, attribute.Value)
+			}
+			logger.console.Log(span.ctx, slog.Level(log.SeverityTrace), "started", extras...)
+		}
 	}
 }
 
@@ -231,6 +238,13 @@ func (span *span) End() {
 		record.SetSeverityText(log.SeverityTrace.String())
 		record.AddAttributes(attributes...)
 		logger.logger.Emit(span.ctx, record)
+		if logger.console != nil {
+			extras := []any{}
+			for _, attribute := range attributes {
+				extras = append(extras, attribute.Key, attribute.Value)
+			}
+			logger.console.Log(span.ctx, slog.Level(log.SeverityTrace), "ended", extras...)
+		}
 	}
 	if tracer != nil {
 		span.span.End(trace.WithTimestamp(now))
