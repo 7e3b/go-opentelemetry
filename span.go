@@ -80,7 +80,7 @@ func callerLine(skip int) int {
 }
 
 func meta() (string, string, int) {
-	pc, file, line, ok := runtime.Caller(3)
+	pc, file, line, ok := runtime.Caller(4)
 	if !ok {
 		return "", "", 0
 	}
@@ -202,11 +202,11 @@ func (span *span) start(ctx context.Context, linked bool, configs ...SpanConfig)
 		record.AddAttributes(attributes...)
 		logger.logger.Emit(span.ctx, record)
 		if logger.console != nil {
-			extras := []any{}
+			extras := []slog.Attr{}
 			for _, attribute := range attributes {
-				extras = append(extras, attribute.Key, attribute.Value)
+				extras = append(extras, slog.Any(string(attribute.Key), attribute.Value.AsInterface()))
 			}
-			logger.console.Log(span.ctx, slog.Level(log.SeverityTrace), "started", extras...)
+			logger.console.LogAttrs(span.ctx, slog.Level(log.SeverityTrace), "started", extras...)
 		}
 	}
 }
@@ -239,11 +239,11 @@ func (span *span) End() {
 		record.AddAttributes(attributes...)
 		logger.logger.Emit(span.ctx, record)
 		if logger.console != nil {
-			extras := []any{}
+			extras := []slog.Attr{}
 			for _, attribute := range attributes {
-				extras = append(extras, attribute.Key, attribute.Value)
+				extras = append(extras, slog.Any(string(attribute.Key), attribute.Value.AsInterface()))
 			}
-			logger.console.Log(span.ctx, slog.Level(log.SeverityTrace), "ended", extras...)
+			logger.console.LogAttrs(span.ctx, slog.Level(log.SeverityTrace), "ended", extras...)
 		}
 	}
 	if tracer != nil {
@@ -311,14 +311,14 @@ func (span *span) record(event string, err error, severity log.Severity, extras 
 		record.AddAttributes(attributes...)
 		logger.logger.Emit(span.ctx, record)
 		if logger.console != nil {
-			extras := []any{}
+			extras := []slog.Attr{}
 			for _, attribute := range attributes {
-				extras = append(extras, attribute.Key, attribute.Value)
+				extras = append(extras, slog.Any(string(attribute.Key), attribute.Value.AsInterface()))
 			}
 			if err != nil {
-				logger.console.Log(span.ctx, slog.Level(severity), err.Error(), extras...)
+				logger.console.LogAttrs(span.ctx, slog.Level(severity), err.Error(), extras...)
 			} else {
-				logger.console.Log(span.ctx, slog.Level(severity), event, extras...)
+				logger.console.LogAttrs(span.ctx, slog.Level(severity), event, extras...)
 			}
 		}
 	}

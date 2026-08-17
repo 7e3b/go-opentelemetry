@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
@@ -144,45 +145,6 @@ type LoggerConfig struct {
 	Console bool `json:"console"`
 }
 
-// Client initializes the OpenTelemetry client using the supplied
-// configuration.
-//
-// Only the telemetry providers enabled by the configuration are initialized.
-//
-// The returned Client should be shared across the application rather than
-// creating a new client for each request or operation.
-//
-// Call Client.Shutdown during application shutdown to flush pending
-// telemetry.
-func (config Config) Client(ctx context.Context) (Client, error) {
-	resource, err := config.resource()
-	if err != nil {
-		return nil, err
-	}
-	client := &client{
-		metadata: !config.WithoutMetadata,
-	}
-	if config.Tracer.SamplingRatio > 0 {
-		client.tracer, err = config.tracer(ctx, resource)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if config.Logger.Severity != "" {
-		client.logger, err = config.logger(ctx, resource)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if config.Meter.Enabled {
-		client.meter, err = config.meter(ctx, resource)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return client, nil
-}
-
 // Connect initializes and configures the package-level OpenTelemetry client.
 //
 // Connect must be called successfully before using the package-level
@@ -207,6 +169,8 @@ func (config Config) Connect(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		otel.SetTracerProvider(client.tracer.provider)
+		otel.SetTextMapPropagator(client.tracer.propagator)
 	}
 	if config.Logger.Severity != "" {
 		client.logger, err = config.logger(ctx, resource)
@@ -219,6 +183,7 @@ func (config Config) Connect(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		otel.SetMeterProvider(client.meter.provider)
 	}
 	mu.Lock()
 	global = client
