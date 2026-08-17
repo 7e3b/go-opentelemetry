@@ -100,7 +100,7 @@ type Client interface {
 	//
 	// Inject does nothing when tracing is disabled.
 	Inject(context.Context, map[string]string)
-	
+
 	// Extract extracts an OpenTelemetry trace context from obj and returns
 	// a new context containing the extracted context.
 	//
@@ -178,6 +178,63 @@ func WithoutTimeout(ctx context.Context) context.Context {
 	client := global
 	mu.RUnlock()
 	return client.WithoutTimeout(ctx)
+}
+
+// Inject injects the OpenTelemetry trace context from ctx into carrier.
+//
+// The resulting key-value pairs can be transported with an outbound
+// message, such as a queue message or HTTP request, and later extracted
+// by the receiving service using Extract.
+//
+// Config.Connect must be called successfully before using Inject.
+//
+// Inject does nothing when tracing is disabled.
+func Inject(ctx context.Context, carrier map[string]string) {
+	mu.RLock()
+	client := global
+	mu.RUnlock()
+	client.Inject(ctx, carrier)
+}
+
+// Extract extracts an OpenTelemetry trace context from carrier and returns
+// a new context containing the extracted context.
+//
+// The returned context can be used to create spans associated with the
+// trace represented by the propagated data.
+//
+// Config.Connect must be called successfully before using Extract.
+//
+// Extract returns context.Background() when tracing is disabled.
+func Extract(ctx context.Context, carrier map[string]string) context.Context {
+	mu.RLock()
+	client := global
+	mu.RUnlock()
+	return client.Extract(ctx, carrier)
+}
+
+// Link starts a new span that is linked to the trace represented by ctx
+// rather than making the new span a child of it.
+//
+// This is useful when work is triggered asynchronously, such as through a
+// queue, where the new operation belongs to the same trace but should not
+// appear as a direct child of the span that produced the work.
+//
+// Span configuration can be supplied through SpanConfig.
+//
+// Config.Connect must be called successfully before using Link.
+//
+// At most one SpanConfig should be supplied. If multiple configurations
+// are supplied, only the first configuration is used.
+//
+// The returned Span should normally be ended using defer:
+//
+//	span := otx.Link(ctx)
+//	defer span.End()
+func Link(ctx context.Context, config ...SpanConfig) Span {
+	mu.RLock()
+	client := global
+	mu.RUnlock()
+	return client.Link(ctx, config...)
 }
 
 type client struct {
