@@ -1,24 +1,44 @@
 # go-otx
 
-A lightweight Go wrapper around [OpenTelemetry](https://opentelemetry.io/) providing a unified API for **distributed tracing, structured logging, metrics, and trace-context propagation**.
+A lightweight Go wrapper around [OpenTelemetry](https://opentelemetry.io/) providing a unified API for:
+
+* Distributed tracing
+* Structured logging
+* Metrics
+* Trace-context propagation
+* Context timeout/cancellation management
 
 The package provides a simple application-level telemetry client while retaining access to the underlying OpenTelemetry SDK when required.
 
 ## Features
 
-* Distributed tracing with OTLP/HTTP export
-* Parent-based trace sampling
-* Structured logging with severity filtering
-* Metrics with OTLP/HTTP export
+* Distributed tracing through OpenTelemetry
+* Configurable trace sampling
+* Structured logging through OpenTelemetry Logs
+* Console JSON logging through Go's `log/slog`
+* Trace-correlated logs
+* Log severity levels:
+
+  * Trace
+  * Debug
+  * Info
+  * Warn
+  * Error
+  * Fatal
+* OpenTelemetry metrics
+* OTLP/HTTP exporters
+* Gzip compression for OTLP exports
+* Configurable TLS/insecure OTLP connections
 * W3C Trace Context propagation
 * W3C Baggage propagation
-* Span-level structured logging
-* Automatic source-code metadata
-* Service and instance resource attributes
-* Graceful telemetry shutdown
-* Context utilities for independent background work
-* Span links for asynchronous work
+* Manual context injection and extraction
+* Span links for asynchronous operations such as queues
+* Context creation with a new timeout while preserving trace context
+* Context creation without inheriting the parent deadline or cancellation
+* Optional source-code metadata
 * Access to the underlying OpenTelemetry `TracerProvider`
+* Package-level global client or explicitly managed client
+* Graceful shutdown with telemetry flushing
 
 ## Installation
 
@@ -26,302 +46,160 @@ The package provides a simple application-level telemetry client while retaining
 go get github.com/7e3b/go-otx
 ```
 
-## Initialization
+## Quick Start
 
-There are two ways to initialize `go-otx`.
-
-### Client-based
-
-Use `Config.Client()` when you want to explicitly pass a telemetry client through your application.
+The package can be configured once during application startup and then used throughout the application.
 
 ```go
-client, err := (otx.Config{
-    Name:        "my-service",
-    Namespace:   "my-application",
-    Environment: "production",
-    Version:     "1.0.0",
-    InstanceID:  "instance-1",
-    Endpoint:    "localhost:4318",
+package main
 
-    Tracer: otx.TracerConfig{
-        SamplingRatio: 1.0,
-    },
+import (
+	"context"
+	"log"
 
-    Logger: otx.LoggerConfig{
-        Severity: otx.SeverityInfo,
-    },
+	"github.com/7e3b/go-otx"
+)
 
-    Meter: otx.MeterConfig{
-        Enabled: true,
-    },
-}).Client(ctx)
+func main() {
+	ctx := context.Background()
 
-if err != nil {
-    log.Fatal(err)
+	err := otx.Config{
+		Name:        "my-service",
+		Namespace:   "my-application",
+		Environment: "production",
+		Version:     "1.0.0",
+		InstanceID:  "instance-1",
+
+		Endpoint: "localhost:4318",
+		Insecure: true,
+
+		Tracer: otx.TracerConfig{
+			SamplingRatio: 1.0,
+		},
+
+		Logger: otx.LoggerConfig{
+			Severity: "info",
+			Console:  true,
+		},
+
+		Meter: otx.MeterConfig{
+			Enabled: true,
+		},
+	}.Connect(ctx)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	defer otx.Shutdown(ctx)
+
+	span := otx.Start(ctx)
+	defer span.End()
+
+	span.Info("application started")
 }
-
-defer client.Shutdown(ctx)
 ```
-
-The returned `Client` should normally be created once during application startup and reused throughout the application.
-
-### Package-level
-
-Use `Config.Connect()` when you want to configure a global telemetry client and use the package-level functions.
-
-```go
-err := (otx.Config{
-    Name:        "my-service",
-    Namespace:   "my-application",
-    Environment: "production",
-    Version:     "1.0.0",
-    InstanceID:  "instance-1",
-    Endpoint:    "localhost:4318",
-
-    Tracer: otx.TracerConfig{
-        SamplingRatio: 1.0,
-    },
-
-    Logger: otx.LoggerConfig{
-        Severity: otx.SeverityInfo,
-    },
-
-    Meter: otx.MeterConfig{
-        Enabled: true,
-    },
-}).Connect(ctx)
-
-if err != nil {
-    log.Fatal(err)
-}
-
-defer otx.Shutdown(ctx)
-```
-
-`Config.Connect()` must complete successfully before using the package-level functions:
-
-* `otx.Start`
-* `otx.Shutdown`
-* `otx.WithNewTimeout`
-* `otx.WithoutTimeout`
 
 ## Configuration
 
-`Config` controls service identity and the telemetry providers.
+The main configuration type is `otx.Config`.
 
 ```go
-otx.Config{
-    Name:        "my-service",
-    Namespace:   "my-application",
-    Environment: "production",
-    Version:     "1.0.0",
-    InstanceID:  "instance-1",
-    Endpoint:    "localhost:4318",
-
-    Tracer: otx.TracerConfig{
-        SamplingRatio: 1.0,
-    },
-
-    Logger: otx.LoggerConfig{
-        Severity: otx.SeverityInfo,
-    },
-
-    Meter: otx.MeterConfig{
-        Enabled: true,
-    },
+type Config struct {
+	Name             string
+	Namespace        string
+	Environment      string
+	Version          string
+	InstanceID       string
+	Endpoint         string
+	Insecure         bool
+	WithoutMetadata  bool
+	Tracer           TracerConfig
+	Meter            MeterConfig
+	Logger           LoggerConfig
 }
 ```
 
 ### Service Identity
 
-The following configuration fields are mapped to OpenTelemetry resource attributes:
+```go
+otx.Config{
+	Name:        "user-service",
+	Namespace:   "my-application",
+	Environment: "production",
+	Version:     "2.1.0",
+	InstanceID:  "user-service-01",
+}
+```
+
+These values are used to populate OpenTelemetry resource attributes:
 
 | Config        | OpenTelemetry attribute       |
 | ------------- | ----------------------------- |
 | `Name`        | `service.name`                |
 | `Namespace`   | `service.namespace`           |
+| `Environment` | `deployment.environment.name` |
 | `Version`     | `service.version`             |
 | `InstanceID`  | `service.instance.id`         |
-| `Environment` | `deployment.environment.name` |
-| `Hostname`    | `host.name`                   |
+| Hostname      | `host.name`                   |
 
-`InstanceID` and `Hostname` represent different concepts. `InstanceID` identifies the specific service instance, while `Hostname` is automatically obtained from the operating system.
+The host name is obtained automatically from the running system.
 
-### OTLP Endpoint
+## OTLP Endpoint
 
-`Endpoint` specifies the OTLP HTTP exporter endpoint.
+The same OTLP/HTTP endpoint configuration is used by the enabled tracing, logging, and metrics exporters.
 
-For example:
+```go
+Endpoint: "localhost:4318",
+Insecure: true,
+```
+
+For a TLS-enabled collector:
+
+```go
+Endpoint: "otel-collector.example.com:4318",
+Insecure: false,
+```
+
+`Insecure: true` disables TLS and is generally useful for local development or private environments where TLS is not required.
+
+## Tracing
+
+Tracing is enabled when `SamplingRatio` is greater than zero.
+
+```go
+Tracer: otx.TracerConfig{
+	SamplingRatio: 1.0,
+},
+```
+
+Examples:
 
 ```text
-localhost:4318
+1.0  -> sample approximately 100% of traces
+0.5  -> sample approximately 50% of traces
+0.1  -> sample approximately 10% of traces
+0.01 -> sample approximately 1% of traces
 ```
 
-The same endpoint is used by the enabled tracing, logging, and metrics exporters.
-
-For a local collector that does not use TLS:
-
-```go
-otx.Config{
-    Endpoint: "localhost:4318",
-    Insecure: true,
-}
-```
-
-## Distributed Tracing
-
-### Starting a Span
-
-Using an explicit client:
-
-```go
-span := client.Start(ctx)
-defer span.End()
-```
-
-Using the package-level API:
-
-```go
-span := otx.Start(ctx)
-defer span.End()
-```
-
-A span represents a unit of work within a distributed trace.
-
-### Naming Spans
-
-A span name can be explicitly provided:
-
-```go
-span := client.Start(ctx, otx.SpanConfig{
-    Name: "process-user",
-})
-defer span.End()
-```
-
-When no name is provided, the client derives the name from the operation's source metadata.
-
-### Span Attributes
-
-Attributes can be supplied when the span is created:
-
-```go
-span := client.Start(ctx, otx.SpanConfig{
-    Name: "process-user",
-    Attributes: map[string]any{
-        "user.id":    userID,
-        "user.type":  "premium",
-        "request.id": requestID,
-    },
-})
-defer span.End()
-```
-
-These attributes are attached to the span and are also available on log records emitted through that span.
-
-### Span Kinds
-
-The package supports the standard OpenTelemetry span kinds:
-
-```go
-otx.KindInternal
-otx.KindServer
-otx.KindClient
-otx.KindProducer
-otx.KindConsumer
-```
-
-For example, an outbound database or HTTP operation can be represented as a client span:
-
-```go
-span := client.Start(ctx, otx.SpanConfig{
-    Name: "postgres.query",
-    Kind: otx.KindClient,
-})
-defer span.End()
-```
-
-When no kind is specified, the span kind is left unspecified.
-
-## Asynchronous Work and Span Links
-
-When work is passed through an asynchronous system such as a queue, the consumer operation does not naturally execute as a child of the producer span.
-
-For example:
+The package uses a parent-based sampler with a trace-ID ratio sampler:
 
 ```text
-Producer service
-
-Trace
-└── Span A
-      │
-      └── Queue message
-              │
-              ▼
-        Consumer service
+ParentBased(
+    TraceIDRatioBased(SamplingRatio)
+)
 ```
 
-The consumer can use the trace context propagated with the message and create a new span with a link to the producer operation.
+If tracing is disabled, `Start` still returns a valid `Span` object, but no OpenTelemetry trace is created.
 
-Use `Link` for this purpose:
+## Logging
 
-```go
-span := client.Link(ctx, otx.SpanConfig{
-    Name: "process-message",
-    Kind: otx.KindConsumer,
-})
-defer span.End()
-```
-
-A linked span represents a relationship between two operations without making the linked span a direct parent-child descendant.
-
-This is particularly useful for:
-
-* Message queues
-* Event streams
-* Background jobs
-* Batch processing
-* Fan-out processing
-* Work that starts after the original request has completed
-
-### Propagating Queue Context
-
-The producer should inject the current trace context into the message:
+Logging is enabled when `Logger.Severity` is not empty.
 
 ```go
-metadata := map[string]string{}
-
-client.Inject(ctx, metadata)
-
-message := Message{
-    Data:     data,
-    Metadata: metadata,
-}
-```
-
-The consumer extracts the context from the message:
-
-```go
-ctx := client.Extract(context.Background(), message.Metadata)
-
-span := client.Link(ctx, otx.SpanConfig{
-    Name: "process-message",
-    Kind: otx.KindConsumer,
-})
-defer span.End()
-```
-
-Using `context.Background()` during extraction intentionally creates a new context that is not tied to the producer's cancellation or deadline while retaining the propagated OpenTelemetry trace context.
-
-## Structured Logging
-
-Logging is performed through the span:
-
-```go
-span.Info("user authenticated")
-span.Debug("cache lookup completed")
-span.Warn("cache miss")
-span.Error(err)
+Logger: otx.LoggerConfig{
+	Severity: "info",
+},
 ```
 
 Supported severities are:
@@ -335,560 +213,1096 @@ otx.SeverityError
 otx.SeverityFatal
 ```
 
-Configure the minimum exported severity:
+Or their string values:
+
+```text
+trace
+debug
+info
+warn
+error
+fatal
+```
+
+The configured severity acts as the minimum exported severity.
+
+For example:
 
 ```go
 Logger: otx.LoggerConfig{
-    Severity: otx.SeverityInfo,
+	Severity: "warn",
 },
 ```
 
-With this configuration, `Trace` and `Debug` records are not exported, while `Info`, `Warn`, `Error`, and `Fatal` records are.
+will export:
 
-### Structured Attributes
-
-Additional attributes can be attached to individual log records:
-
-```go
-span.Info(
-    "user authenticated",
-    map[string]any{
-        "user.id":     userID,
-        "auth.method": "otp",
-    },
-)
+```text
+warn
+error
+fatal
 ```
 
-### Errors
-
-Use `Error` when an error is available:
-
-```go
-if err != nil {
-    span.Error(err)
-    return err
-}
-```
-
-The error is recorded as an OpenTelemetry error and the associated span status is set to `Error`.
-
-Additional attributes can also be provided:
-
-```go
-span.Error(
-    err,
-    map[string]any{
-        "user.id":   userID,
-        "operation": "database.query",
-    },
-)
-```
+while `trace`, `debug`, and `info` records are filtered out.
 
 ### Fatal
 
-`Fatal` records an event at fatal severity and marks the span as failed.
-
-It **does not** terminate the application:
+`Fatal` represents a critical error, but it **does not terminate the application**.
 
 ```go
 span.Fatal(err)
 ```
 
-## Span and Log Correlation
+This is intentional. The package records the event as fatal telemetry without calling `os.Exit`, `panic`, or otherwise terminating the process.
 
-Logs emitted through a `Span` use the span's context.
+## Console Logging
 
-This allows an observability backend such as SigNoz to correlate logs with traces:
-
-```text
-Trace
-└── Span
-    ├── Log: request received
-    ├── Log: database query
-    ├── Log: cache miss
-    └── Log: request completed
-```
-
-This makes it possible to navigate from a trace to the logs generated during that operation.
-
-## Source Metadata
-
-Source metadata collection is enabled by default.
-
-Telemetry can include:
-
-* Source file
-* Function
-* Line number
-
-For example:
-
-```text
-file:     user/service.go
-function: user.(*Service).Create
-line:     42
-```
-
-To disable metadata collection:
+Console logging can be enabled independently using `LoggerConfig.Console`.
 
 ```go
-otx.Config{
-    WithoutMetadata: true,
-}
-```
-
-Disabling metadata reduces the runtime overhead associated with collecting source information.
-
-## Trace Context Propagation
-
-The client provides an OpenTelemetry text-map propagator supporting:
-
-* W3C Trace Context
-* W3C Baggage
-
-Retrieve the propagator with:
-
-```go
-propagator := client.Propagator()
-```
-
-### Inject
-
-`Inject` places the current trace context into a string map.
-
-```go
-carrier := map[string]string{}
-
-client.Inject(ctx, carrier)
-```
-
-The resulting map can be transported with an outbound message, queue event, or other custom transport.
-
-For example:
-
-```go
-message := Message{
-    Data:     data,
-    Metadata: carrier,
-}
-```
-
-### Extract
-
-`Extract` reads trace context from a string map and returns a context containing the extracted propagation information.
-
-```go
-ctx := client.Extract(context.Background(), carrier)
-```
-
-The returned context can then be used to create spans associated with the propagated trace.
-
-### HTTP Propagation
-
-For transports that are not automatically instrumented, trace context can be injected into outbound requests:
-
-```go
-carrier := propagation.HeaderCarrier(req.Header)
-
-client.Propagator().Inject(ctx, carrier)
-```
-
-Incoming trace context can similarly be extracted:
-
-```go
-ctx = client.Propagator().Extract(
-    ctx,
-    propagation.HeaderCarrier(req.Header),
-)
-```
-
-This allows traces to continue across service boundaries.
-
-## Context Utilities
-
-The client provides utilities for creating contexts that preserve OpenTelemetry propagation information.
-
-These utilities are also available through the package-level API after `Config.Connect()` has completed successfully.
-
-### WithNewTimeout
-
-Creates a new context with a new timeout without inheriting the cancellation or deadline of the supplied context.
-
-Using a client:
-
-```go
-ctx, cancel := client.WithNewTimeout(ctx, 30*time.Second)
-defer cancel()
-```
-
-Using the package-level API:
-
-```go
-ctx, cancel := otx.WithNewTimeout(ctx, 30*time.Second)
-defer cancel()
-```
-
-The OpenTelemetry trace and baggage propagation information is preserved.
-
-### WithoutTimeout
-
-Creates a context that does not inherit the deadline or cancellation of the original context:
-
-```go
-ctx = client.WithoutTimeout(ctx)
-```
-
-Or:
-
-```go
-ctx = otx.WithoutTimeout(ctx)
-```
-
-The OpenTelemetry trace and baggage propagation information is preserved.
-
-This is useful for background work that should continue after the original request context is cancelled.
-
-Note that arbitrary values stored in the original `context.Context` are not copied.
-
-## Sampling
-
-Tracing uses a parent-based ratio sampler.
-
-```go
-Tracer: otx.TracerConfig{
-    SamplingRatio: 0.1,
+Logger: otx.LoggerConfig{
+	Severity: "info",
+	Console:  true,
 },
 ```
 
-| Sampling Ratio | Behavior                            |
-| -------------: | ----------------------------------- |
-|    `0` or less | Tracing disabled                    |
-|          `0.1` | Approximately 10% of traces sampled |
-|          `0.5` | Approximately 50% of traces sampled |
-|          `1.0` | All traces sampled                  |
+When enabled, log records are also written as structured JSON to the process's standard output using Go's `log/slog` JSON handler.
 
-Because the sampler is parent-based, child spans follow the sampling decision of a valid parent span.
+For example:
 
-## Metrics
-
-Metrics can be enabled independently of tracing and logging:
-
-```go
-Meter: otx.MeterConfig{
-    Enabled: true,
-}
+```json
+{"time":"2026-08-17T10:00:00Z","level":"INFO","msg":"user created","user_id":"123"}
 ```
 
-When enabled, the client initializes an OpenTelemetry `MeterProvider` and exports metrics through OTLP/HTTP.
+This makes the output suitable for containerized applications where the container runtime, Docker, Kubernetes, or a log collector reads the application's `stdout`.
 
-## Provider Access
+The console logger uses the same configured minimum severity.
 
-The client can expose the underlying SDK tracer provider when direct SDK integration is required:
+### Why JSON Console Logging?
 
-```go
-provider := client.TraceProvider()
-```
+Console logging is intended primarily for environments where application output is collected by the runtime or infrastructure.
 
-For example, this can be passed to libraries that accept a `*trace.TracerProvider`.
-
-`TraceProvider()` returns `nil` when tracing is disabled.
-
-## Graceful Shutdown
-
-Telemetry providers should be flushed and shut down during application shutdown.
-
-With an explicit client:
-
-```go
-ctx, cancel := context.WithTimeout(
-    context.Background(),
-    10*time.Second,
-)
-defer cancel()
-
-if err := client.Shutdown(ctx); err != nil {
-    log.Printf("failed to shutdown telemetry: %v", err)
-}
-```
-
-With the package-level client:
-
-```go
-ctx, cancel := context.WithTimeout(
-    context.Background(),
-    10*time.Second,
-)
-defer cancel()
-
-if err := otx.Shutdown(ctx); err != nil {
-    log.Printf("failed to shutdown telemetry: %v", err)
-}
-```
-
-`Shutdown` flushes pending telemetry before shutting down the enabled providers.
-
-## Recommended Application Lifecycle
-
-### Client-based
-
-A typical application using an explicit `Client` should follow this lifecycle:
+For example:
 
 ```text
-Application startup
-        │
-        ▼
-Create Client
-        │
-        ▼
-Initialize HTTP / DB / Messaging clients
-        │
-        ▼
-Handle requests
-        │
-        ├── Start Span
-        │      ├── Attributes
-        │      ├── Info / Debug / Warn
-        │      ├── Error
-        │      └── End
-        │
-        ▼
-Application shutdown
-        │
-        ▼
-Client.Shutdown()
+Go application
+      |
+      v
+  slog JSON
+      |
+    stdout
+      |
+      v
+Docker / Kubernetes
+      |
+      v
+Log collector
 ```
 
-The telemetry `Client` should normally be created once and reused throughout the application's lifetime.
+The OpenTelemetry logger continues to export structured log records through OTLP independently.
 
-### Package-level
+## Spans
 
-When using the global API:
-
-```text
-Application startup
-        │
-        ▼
-Config.Connect()
-        │
-        ▼
-Initialize HTTP / DB / Messaging clients
-        │
-        ▼
-Handle requests
-        │
-        ├── otx.Start()
-        │      ├── Attributes
-        │      ├── Info / Debug / Warn
-        │      ├── Error
-        │      └── End
-        │
-        ▼
-Application shutdown
-        │
-        ▼
-otx.Shutdown()
-```
-
-`Config.Connect()` must have completed successfully before any package-level telemetry function is used.
-
-## Example: Nested Operations
-
-```go
-func CreateUser(ctx context.Context, client otx.Client) error {
-    span := client.Start(ctx, otx.SpanConfig{
-        Name: "user.create",
-        Kind: otx.KindInternal,
-    })
-    defer span.End()
-
-    span.Info("creating user")
-
-    if err := validateUser(); err != nil {
-        span.Error(err)
-        return err
-    }
-
-    if err := saveUser(ctx); err != nil {
-        span.Error(err)
-        return err
-    }
-
-    span.Info("user created")
-
-    return nil
-}
-```
-
-A downstream operation can create its own child span using the context associated with the parent operation.
-
-## Example: HTTP Request
-
-For an HTTP server, the request context should first contain the extracted incoming trace context. The request handler can then create a server span:
-
-```go
-func Handler(ctx context.Context, client otx.Client) error {
-    span := client.Start(ctx, otx.SpanConfig{
-        Name: "GET /users",
-        Kind: otx.KindServer,
-    })
-    defer span.End()
-
-    span.Info("request received")
-
-    // Application logic...
-
-    return nil
-}
-```
-
-An outbound request can use a client span:
-
-```go
-span := client.Start(ctx, otx.SpanConfig{
-    Name: "GET users-service",
-    Kind: otx.KindClient,
-})
-defer span.End()
-
-// Inject the trace context into the outbound request.
-```
-
-## Example: Queue Producer and Consumer
-
-A common asynchronous flow looks like this:
-
-```text
-HTTP Request
-    │
-    ▼
-Service A
-    │
-    ├── Span A
-    │
-    └── Queue
-          │
-          │ trace context
-          ▼
-      Service B
-          │
-          └── Span B
-               │
-               └── Link → Span A
-```
-
-The producer creates its normal span and injects the context into the message:
-
-```go
-func Publish(ctx context.Context, client otx.Client, data []byte) error {
-    span := client.Start(ctx, otx.SpanConfig{
-        Name: "publish-message",
-        Kind: otx.KindProducer,
-    })
-    defer span.End()
-
-    metadata := map[string]string{}
-    client.Inject(ctx, metadata)
-
-    return queue.Publish(Message{
-        Data:     data,
-        Metadata: metadata,
-    })
-}
-```
-
-The consumer extracts the propagated context and creates a linked consumer span:
-
-```go
-func Consume(message Message, client otx.Client) error {
-    ctx := client.Extract(context.Background(), message.Metadata)
-
-    span := client.Link(ctx, otx.SpanConfig{
-        Name: "process-message",
-        Kind: otx.KindConsumer,
-    })
-    defer span.End()
-
-    // Process message...
-
-    return nil
-}
-```
-
-The consumer does not inherit the producer's cancellation or deadline because the propagated context is extracted into a new `context.Background()`.
-
-This makes the consumer operation independent of the producer's lifetime while retaining the trace relationship.
-
-## Global API
-
-The package-level API operates on the client configured by `Config.Connect()`.
-
-### Start
+A span represents a unit of work within a distributed trace.
 
 ```go
 span := otx.Start(ctx)
 defer span.End()
 ```
 
-A span configuration can be supplied:
+The span also provides structured logging methods, allowing logs and traces to be correlated.
+
+```go
+span.Info("processing request")
+span.Debug("loading user")
+span.Warn("cache miss")
+span.Error(err)
+```
+
+## Span Configuration
+
+A span can be configured using `SpanConfig`.
 
 ```go
 span := otx.Start(ctx, otx.SpanConfig{
-    Name: "process-user",
-    Kind: otx.KindInternal,
+	Name: "create-user",
+	Kind: otx.KindServer,
+	Attributes: map[string]any{
+		"user_id":  "123",
+		"source":   "api",
+		"attempt":  1,
+	},
+})
+
+defer span.End()
+```
+
+Only the first `SpanConfig` supplied to `Start` or `Link` is used.
+
+### Span Name
+
+If `Name` is omitted, the package derives the name from the calling function when source-code metadata is enabled.
+
+```go
+span := otx.Start(ctx)
+```
+
+Explicit names are recommended for important application operations:
+
+```go
+span := otx.Start(ctx, otx.SpanConfig{
+	Name: "create-user",
+})
+```
+
+### Span Kind
+
+Supported span kinds are:
+
+```go
+otx.KindInternal
+otx.KindServer
+otx.KindClient
+otx.KindProducer
+otx.KindConsumer
+```
+
+Example:
+
+```go
+span := otx.Start(ctx, otx.SpanConfig{
+	Name: "publish-event",
+	Kind: otx.KindProducer,
+})
+
+defer span.End()
+```
+
+## Span Attributes
+
+Attributes can be provided as a `map[string]any`.
+
+```go
+span := otx.Start(ctx, otx.SpanConfig{
+	Attributes: map[string]any{
+		"user_id":  123,
+		"username": "gokul",
+		"premium":  true,
+	},
+})
+```
+
+Values are converted to strings before being attached to telemetry.
+
+The same span attributes are also available on log records emitted through that span.
+
+## Structured Logging
+
+Logging methods accept an optional attributes map.
+
+```go
+span.Info("user created", map[string]any{
+	"user_id":  userID,
+	"username": username,
+})
+```
+
+Available methods:
+
+```go
+span.Trace(...)
+span.Debug(...)
+span.Info(...)
+span.Warn(...)
+span.Error(...)
+span.Fatal(...)
+```
+
+### Trace
+
+```go
+span.Trace("entering repository")
+```
+
+### Debug
+
+```go
+span.Debug("cache lookup completed", map[string]any{
+	"key": "user:123",
+})
+```
+
+### Info
+
+```go
+span.Info("user created", map[string]any{
+	"user_id": 123,
+})
+```
+
+### Warn
+
+```go
+span.Warn("cache miss", map[string]any{
+	"key": "user:123",
+})
+```
+
+### Error
+
+```go
+span.Error(err, map[string]any{
+	"operation": "create-user",
+})
+```
+
+An error record:
+
+* Records the error on the OpenTelemetry span
+* Marks the span status as `Error`
+* Emits the error at error severity
+
+A nil error is ignored.
+
+### Fatal
+
+```go
+span.Fatal(err, map[string]any{
+	"operation": "database-migration",
+})
+```
+
+`Fatal` behaves like a fatal telemetry event but does not terminate the application.
+
+## Trace and Log Correlation
+
+Logs emitted through a `Span` use the span's context.
+
+```go
+span := otx.Start(ctx)
+defer span.End()
+
+span.Info("processing request")
+```
+
+This allows an OpenTelemetry backend such as SigNoz to correlate the log record with the trace and span that produced it.
+
+The resulting relationship is conceptually:
+
+```text
+Trace
+ |
+ +-- Span
+      |
+      +-- Log: processing request
+      |
+      +-- Log: database query
+      |
+      +-- Log: request completed
+```
+
+## Span Context
+
+A span exposes its context through `Ctx()`.
+
+```go
+span := otx.Start(ctx)
+defer span.End()
+
+ctx := span.Ctx()
+
+doSomething(ctx)
+```
+
+Use `Span.Ctx()` when an operation needs to continue the trace from the current span.
+
+## Linking Asynchronous Work
+
+`Link` is intended for asynchronous operations where the new span should reference another span without becoming its direct child.
+
+This is particularly useful with:
+
+* Message queues
+* NATS
+* Kafka
+* RabbitMQ
+* Background jobs
+* Event-driven processing
+
+For example, a producer can inject its trace context into a message:
+
+```go
+span := otx.Start(ctx, otx.SpanConfig{
+	Name: "publish-order",
+	Kind: otx.KindProducer,
+})
+defer span.End()
+
+headers := map[string]string{}
+
+otx.Inject(span.Ctx(), headers)
+
+publish(headers)
+```
+
+The consumer can then extract the context:
+
+```go
+ctx := otx.Extract(context.Background(), headers)
+
+span := otx.Link(ctx, otx.SpanConfig{
+	Name: "process-order",
+	Kind: otx.KindConsumer,
 })
 defer span.End()
 ```
 
-### Shutdown
+`Link` creates a new root span and attaches the extracted span context as a span link.
 
-```go
-if err := otx.Shutdown(ctx); err != nil {
-    log.Printf("failed to shutdown telemetry: %v", err)
-}
+Conceptually:
+
+```text
+Trace
+ |
+ +-- Producer Span
+ |      |
+ |      +-- Message
+ |            |
+ |            +-------------------+
+ |                                |
+ +-- Consumer Span <---------------+
+        |
+        +-- Span Link -> Producer Span
 ```
 
+This avoids representing asynchronous work as a direct parent-child relationship while still preserving the relationship between the operations.
+
+## Trace Context Propagation
+
+The package uses:
+
+```text
+W3C Trace Context
+W3C Baggage
+```
+
+through:
+
+```go
+propagation.NewCompositeTextMapPropagator(
+	propagation.TraceContext{},
+	propagation.Baggage{},
+)
+```
+
+### Inject
+
+Inject the current trace context into a string map:
+
+```go
+headers := map[string]string{}
+
+otx.Inject(ctx, headers)
+```
+
+The resulting map can be transported with:
+
+* HTTP headers
+* Queue messages
+* NATS message headers
+* Kafka headers
+* Custom RPC metadata
+* Other message transports
+
+### Extract
+
+Extract the context on the receiving side:
+
+```go
+ctx := otx.Extract(context.Background(), headers)
+```
+
+The resulting context can then be used to create a span:
+
+```go
+span := otx.Link(ctx)
+defer span.End()
+```
+
+## Propagator
+
+The configured propagator can also be accessed directly from a client.
+
+```go
+client, err := config.Client(ctx)
+if err != nil {
+	return err
+}
+
+propagator := client.Propagator()
+```
+
+`Propagator()` returns `nil` when tracing is disabled.
+
+## Context Management
+
+The package provides helpers for creating contexts while preserving OpenTelemetry trace context.
+
 ### WithNewTimeout
+
+`WithNewTimeout` creates a new timeout/cancellation boundary while preserving the current OpenTelemetry trace context.
 
 ```go
 ctx, cancel := otx.WithNewTimeout(ctx, 30*time.Second)
 defer cancel()
 ```
 
+The new context does not inherit the previous context's deadline or cancellation, but retains its OpenTelemetry trace context.
+
+This is useful when an operation needs its own independent timeout.
+
 ### WithoutTimeout
 
+`WithoutTimeout` removes the deadline and cancellation inherited from the supplied context while preserving its OpenTelemetry trace context.
+
 ```go
-ctx = otx.WithoutTimeout(ctx)
+ctx := otx.WithoutTimeout(ctx)
 ```
 
-All package-level functions require a successfully initialized global client through `Config.Connect()`.
+This is useful for background work that should continue after the original request has completed.
 
-## OpenTelemetry Model
-
-This package follows the OpenTelemetry model while providing a simpler application-facing API:
+For example:
 
 ```text
-Resource
-│
-├── Service identity
-├── Environment
-├── Instance
-└── Host
-    │
-    ├── Traces
-    │    └── Spans
-    │         ├── Attributes
-    │         ├── Events
-    │         └── Links
-    │
-    ├── Logs
-    │    ├── Severity
-    │    ├── Body
-    │    └── Attributes
-    │
-    └── Metrics
+HTTP Request Context
+       |
+       +-- Request Span
+       |
+       +-- Background Work
+               |
+               +-- Same trace context
+               +-- Independent cancellation
 ```
 
-The underlying OpenTelemetry SDK remains accessible when deeper integration is required.
+## Metrics
+
+Metrics are enabled using:
+
+```go
+Meter: otx.MeterConfig{
+	Enabled: true,
+},
+```
+
+The package initializes an OpenTelemetry SDK `MeterProvider` and exports metrics through OTLP/HTTP.
+
+The current high-level `Client` API focuses on configuring and managing the metrics provider. The underlying provider can be accessed through the OpenTelemetry SDK when direct metric instrumentation is required.
+
+## Underlying Trace Provider
+
+The underlying OpenTelemetry SDK `TracerProvider` can be accessed through:
+
+```go
+provider := client.TraceProvider()
+```
+
+This is useful when integrating with libraries that expect:
+
+```go
+*trace.TracerProvider
+```
+
+For example:
+
+```go
+provider := client.TraceProvider()
+
+if provider != nil {
+	// Integrate provider with a library that accepts
+	// *sdkTrace.TracerProvider.
+}
+```
+
+`TraceProvider()` returns `nil` when tracing is disabled.
+
+## Client vs Package-Level API
+
+There are two ways to use the package.
+
+### Package-Level API
+
+Call `Config.Connect()` once:
+
+```go
+err := otx.Config{
+	Name: "my-service",
+
+	Tracer: otx.TracerConfig{
+		SamplingRatio: 1.0,
+	},
+}.Connect(ctx)
+
+if err != nil {
+	return err
+}
+```
+
+Then use:
+
+```go
+span := otx.Start(ctx)
+defer span.End()
+```
+
+and:
+
+```go
+otx.Inject(ctx, headers)
+otx.Extract(ctx, headers)
+otx.WithNewTimeout(ctx, time.Second)
+otx.WithoutTimeout(ctx)
+otx.Shutdown(ctx)
+```
+
+This style is convenient for application-wide telemetry.
+
+### Explicit Client
+
+Alternatively, create an explicit client:
+
+```go
+client, err := config.Client(ctx)
+if err != nil {
+	return err
+}
+
+defer client.Shutdown(ctx)
+
+span := client.Start(ctx)
+defer span.End()
+```
+
+This approach is useful when dependency injection is preferred or when an application needs to manage telemetry clients explicitly.
+
+## Recommended Application Lifecycle
+
+A typical application lifecycle is:
+
+```text
+Application startup
+        |
+        v
+Config.Connect()
+        |
+        v
+Application runs
+        |
+        +--> Start spans
+        |
+        +--> Emit logs
+        |
+        +--> Record metrics
+        |
+        +--> Inject/extract trace context
+        |
+        v
+Graceful shutdown
+        |
+        v
+Shutdown()
+        |
+        v
+Flush telemetry
+        |
+        v
+Exit
+```
+
+Example:
+
+```go
+func main() {
+	ctx := context.Background()
+
+	config := otx.Config{
+		Name:        "user-service",
+		Namespace:   "my-application",
+		Environment: "production",
+		Version:     "1.0.0",
+
+		Endpoint: "otel-collector:4318",
+
+		Tracer: otx.TracerConfig{
+			SamplingRatio: 1.0,
+		},
+
+		Logger: otx.LoggerConfig{
+			Severity: "info",
+			Console:  true,
+		},
+
+		Meter: otx.MeterConfig{
+			Enabled: true,
+		},
+	}
+
+	if err := config.Connect(ctx); err != nil {
+		panic(err)
+	}
+
+	defer otx.Shutdown(ctx)
+
+	runApplication(ctx)
+}
+```
+
+## Source-Code Metadata
+
+Source-code metadata is enabled by default.
+
+The package can attach:
+
+* Source file
+* Function
+* Line number
+
+to spans and log records.
+
+For example:
+
+```text
+file=/app/user/service.go
+function=github.com/example/user.(*Service).Create
+line=42
+```
+
+This is useful during development and debugging.
+
+### Disable Metadata
+
+Metadata can be disabled:
+
+```go
+WithoutMetadata: true,
+```
+
+Disabling metadata can reduce:
+
+* Runtime overhead
+* Stack inspection
+* Telemetry size
+* Exported attribute volume
+
+For high-throughput production services, disabling metadata may be desirable if source-level metadata is not required.
+
+## Error Handling
+
+Calling:
+
+```go
+span.Error(err)
+```
+
+records the error and marks the span as failed.
+
+For example:
+
+```go
+span := otx.Start(ctx)
+defer span.End()
+
+err := repository.Create(ctx, user)
+if err != nil {
+	span.Error(err)
+	return err
+}
+```
+
+The error is recorded on the OpenTelemetry span using `RecordError`, and the span status is set to `Error`.
+
+Calling `Error(nil)` does nothing.
+
+## Span Status
+
+An error recorded through `Error` or `Fatal` marks the span as failed.
+
+For example:
+
+```go
+span.Error(err)
+```
+
+results in:
+
+```text
+Span Status = Error
+```
+
+An ordinary `Info`, `Debug`, `Trace`, or `Warn` event does not automatically mark the span as failed.
+
+## Shutdown
+
+Telemetry providers use batching, so applications should call `Shutdown` during graceful termination.
+
+```go
+defer otx.Shutdown(ctx)
+```
+
+Shutdown flushes pending telemetry and shuts down the enabled providers.
+
+The shutdown sequence includes:
+
+```text
+TracerProvider
+    -> ForceFlush
+    -> Shutdown
+
+LoggerProvider
+    -> ForceFlush
+    -> Shutdown
+
+MeterProvider
+    -> ForceFlush
+    -> Shutdown
+```
+
+If a provider fails to flush or shut down, the error is returned.
+
+## Environment-Based Configuration
+
+`Config` is designed to work well with environment variables.
+
+For example:
+
+```go
+config := otx.Config{
+	Name:        os.Getenv("OTEL_SERVICE_NAME"),
+	Namespace:   os.Getenv("OTEL_SERVICE_NAMESPACE"),
+	Environment: os.Getenv("APP_ENVIRONMENT"),
+	Version:     os.Getenv("APP_VERSION"),
+	InstanceID:  os.Getenv("APP_INSTANCE_ID"),
+
+	Endpoint: os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
+	Insecure: os.Getenv("OTEL_EXPORTER_OTLP_INSECURE") == "true",
+
+	Tracer: otx.TracerConfig{
+		SamplingRatio: 1.0,
+	},
+
+	Logger: otx.LoggerConfig{
+		Severity: os.Getenv("LOG_LEVEL"),
+		Console:  os.Getenv("LOG_CONSOLE") == "true",
+	},
+
+	Meter: otx.MeterConfig{
+		Enabled: os.Getenv("OTEL_METRICS_ENABLED") == "true",
+	},
+}
+```
+
+This allows the same application binary to use different telemetry configurations across environments.
+
+For example:
+
+```text
+Development
+    LOG_LEVEL=debug
+    LOG_CONSOLE=true
+    OTEL_EXPORTER_OTLP_INSECURE=true
+
+Staging
+    LOG_LEVEL=info
+    LOG_CONSOLE=true
+
+Production
+    LOG_LEVEL=warn
+    LOG_CONSOLE=false
+```
+
+## OTLP Collector
+
+The package exports telemetry using OTLP over HTTP.
+
+A typical architecture is:
+
+```text
+                +----------------+
+                |   Go Service   |
+                |                |
+                |  go-otx        |
+                +-------+--------+
+                        |
+                  OTLP / HTTP
+                        |
+                        v
+                +----------------+
+                | OTel Collector |
+                +-------+--------+
+                        |
+             +----------+----------+
+             |          |          |
+             v          v          v
+           Traces      Logs      Metrics
+```
+
+The OTLP endpoint should normally point to an OpenTelemetry Collector or another OTLP-compatible backend.
+
+## Example: HTTP Request
+
+```go
+func (h *Handler) CreateUser(ctx context.Context) error {
+	span := otx.Start(ctx, otx.SpanConfig{
+		Name: "create-user",
+		Kind: otx.KindServer,
+	})
+
+	defer span.End()
+
+	span.Info("creating user")
+
+	user, err := h.service.CreateUser(span.Ctx())
+	if err != nil {
+		span.Error(err)
+		return err
+	}
+
+	span.Info("user created", map[string]any{
+		"user_id": user.ID,
+	})
+
+	return nil
+}
+```
+
+## Example: Outbound Request
+
+```go
+func (c *Client) GetUser(ctx context.Context, id string) error {
+	span := otx.Start(ctx, otx.SpanConfig{
+		Name: "get-user",
+		Kind: otx.KindClient,
+	})
+
+	defer span.End()
+
+	span.Info("sending user request")
+
+	// Perform outbound request using span.Ctx().
+
+	return nil
+}
+```
+
+## Example: Queue Producer
+
+```go
+func publishOrder(ctx context.Context, orderID string) error {
+	span := otx.Start(ctx, otx.SpanConfig{
+		Name: "publish-order",
+		Kind: otx.KindProducer,
+	})
+
+	defer span.End()
+
+	headers := map[string]string{}
+
+	otx.Inject(span.Ctx(), headers)
+
+	// Publish orderID and headers to the queue.
+
+	span.Info("order published", map[string]any{
+		"order_id": orderID,
+	})
+
+	return nil
+}
+```
+
+## Example: Queue Consumer
+
+```go
+func consumeOrder(headers map[string]string, orderID string) error {
+	ctx := otx.Extract(context.Background(), headers)
+
+	span := otx.Link(ctx, otx.SpanConfig{
+		Name: "consume-order",
+		Kind: otx.KindConsumer,
+	})
+
+	defer span.End()
+
+	span.Info("processing order", map[string]any{
+		"order_id": orderID,
+	})
+
+	return nil
+}
+```
+
+Using `Link` for this type of asynchronous workflow preserves the relationship between the producer and consumer without making the consumer span a direct child of the producer span.
+
+## API Reference
+
+### Global Functions
+
+```go
+Start(context.Context, ...SpanConfig) Span
+
+Shutdown(context.Context) error
+
+WithNewTimeout(context.Context, time.Duration) (context.Context, context.CancelFunc)
+
+WithoutTimeout(context.Context) context.Context
+```
+
+### Client Interface
+
+```go
+type Client interface {
+	Start(context.Context, ...SpanConfig) Span
+
+	Link(context.Context, ...SpanConfig) Span
+
+	Shutdown(context.Context) error
+
+	Propagator() propagation.TextMapPropagator
+
+	WithNewTimeout(context.Context, time.Duration) (context.Context, context.CancelFunc)
+
+	WithoutTimeout(context.Context) context.Context
+
+	TraceProvider() *sdkTrace.TracerProvider
+
+	Inject(context.Context, map[string]string)
+
+	Extract(context.Context, map[string]string) context.Context
+}
+```
+
+### Span Interface
+
+```go
+type Span interface {
+	End()
+
+	Trace(string, ...map[string]any)
+
+	Info(string, ...map[string]any)
+
+	Debug(string, ...map[string]any)
+
+	Warn(string, ...map[string]any)
+
+	Error(error, ...map[string]any)
+
+	Fatal(error, ...map[string]any)
+
+	Ctx() context.Context
+}
+```
+
+### Configuration Types
+
+```go
+type Config struct {
+	Name            string
+	Namespace       string
+	Environment     string
+	Version         string
+	InstanceID      string
+	Endpoint        string
+	Insecure        bool
+	WithoutMetadata bool
+	Tracer          TracerConfig
+	Meter           MeterConfig
+	Logger          LoggerConfig
+}
+```
+
+```go
+type TracerConfig struct {
+	SamplingRatio float64
+}
+```
+
+```go
+type MeterConfig struct {
+	Enabled bool
+}
+```
+
+```go
+type LoggerConfig struct {
+	Severity string
+	Console  bool
+}
+```
+
+```go
+type SpanConfig struct {
+	Name       string
+	Kind       string
+	Attributes map[string]any
+}
+```
+
+## Design Principles
+
+### One Client per Application
+
+Create the telemetry client once during application startup.
+
+Avoid creating a new client for every request:
+
+```text
+Application
+    |
+    +-- One otx Client
+          |
+          +-- Request 1
+          +-- Request 2
+          +-- Request 3
+          +-- ...
+```
+
+### Context Carries Trace State
+
+The package follows the standard OpenTelemetry model where trace state is carried through `context.Context`.
+
+Use:
+
+```go
+span.Ctx()
+```
+
+when continuing work inside the current span.
+
+### Explicit Propagation for Custom Transports
+
+For automatically instrumented transports, instrumentation may handle propagation automatically.
+
+For custom queues or messaging systems, use:
+
+```go
+otx.Inject(...)
+otx.Extract(...)
+```
+
+to explicitly propagate trace context.
+
+### Asynchronous Work Uses Links
+
+When work crosses an asynchronous boundary such as a queue, use `Link` when the consumer should not be represented as a direct child of the producer.
+
+## Dependencies
+
+The package is built around the OpenTelemetry Go SDK and uses:
+
+* OpenTelemetry API
+* OpenTelemetry SDK
+* OTLP HTTP trace exporter
+* OTLP HTTP log exporter
+* OTLP HTTP metric exporter
+* Go `log/slog`
 
 ## License
 

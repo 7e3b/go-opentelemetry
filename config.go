@@ -3,6 +3,7 @@ package otx
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"os"
 
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
@@ -137,6 +138,10 @@ type LoggerConfig struct {
 	//
 	// An empty value disables logging.
 	Severity string
+
+	// Console determines whether log records are also written as structured
+	// JSON to the process's standard output.
+	Console bool
 }
 
 // Client initializes the OpenTelemetry client using the supplied
@@ -289,6 +294,16 @@ func (config Config) logger(ctx context.Context, resource *resource.Resource) (*
 	logger.severity = severity
 	logger.provider = sdkLog.NewLoggerProvider(providerOpts...)
 	logger.logger = logger.provider.Logger(config.Name)
+	if config.Logger.Console {
+		logger.console = slog.New(
+			slog.NewJSONHandler(
+				os.Stdout,
+				&slog.HandlerOptions{
+					Level: slog.Level(severity),
+				},
+			),
+		)
+	}
 	return logger, nil
 }
 

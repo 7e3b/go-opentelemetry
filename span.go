@@ -3,6 +3,7 @@ package otx
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"runtime"
 	"time"
 
@@ -51,6 +52,13 @@ type Span interface {
 	// A nil error is ignored. This method records telemetry but does not
 	// terminate the application.
 	Fatal(error, ...map[string]any)
+
+	// Ctx returns the context associated with the span.
+	//
+	// The returned context contains the span's trace context and should be
+	// used for operations performed within the span when propagation is
+	// required.
+	Ctx() context.Context
 }
 
 type span struct {
@@ -229,6 +237,10 @@ func (span *span) End() {
 	}
 }
 
+func (span *span) Ctx() context.Context {
+	return span.ctx
+}
+
 func (span *span) record(event string, err error, severity log.Severity, extras ...map[string]any) {
 	tracer := span.client.tracer
 	logger := span.client.logger
@@ -284,6 +296,17 @@ func (span *span) record(event string, err error, severity log.Severity, extras 
 		record.SetObservedTimestamp(now)
 		record.AddAttributes(attributes...)
 		logger.logger.Emit(span.ctx, record)
+		if logger.console != nil {
+			extras := []any{}
+			for _, attribute := range attributes {
+				extras = append(extras, attribute.Key, attribute.Value)
+			}
+			if err != nil {
+				logger.console.Log(span.ctx, slog.Level(severity), err.Error(), extras...)
+			} else {
+				logger.console.Log(span.ctx, slog.Level(severity), event, extras...)
+			}
+		}
 	}
 }
 
