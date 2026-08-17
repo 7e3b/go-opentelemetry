@@ -56,35 +56,35 @@ type Config struct {
 	// Name identifies the service emitting telemetry.
 	//
 	// This value is used as the OpenTelemetry service.name resource attribute.
-	Name string
+	Name string `json:"name"`
 
 	// Namespace identifies the logical namespace of the service.
-	Namespace string
+	Namespace string `json:"namespace"`
 
 	// Environment identifies the deployment environment, such as
 	// "development", "staging", or "production".
-	Environment string
+	Environment string `json:"environment"`
 
 	// Version identifies the version of the running service.
-	Version string
+	Version string `json:"version"`
 
 	// InstanceID identifies the specific running instance of the service.
 	//
 	// In a containerized environment this can be set to a pod, task, or
 	// other instance identifier.
-	InstanceID string
+	InstanceID string `json:"instance_id"`
 
 	// Endpoint specifies the OTLP HTTP endpoint used to export telemetry.
 	//
 	// The configured endpoint is used by the enabled tracing, logging,
 	// and metrics exporters.
-	Endpoint string
+	Endpoint string `json:"endpoint"`
 
 	// Insecure disables TLS when communicating with the OTLP endpoint.
 	//
 	// This is generally useful for local development or environments where
 	// the collector endpoint does not require TLS.
-	Insecure bool
+	Insecure bool `json:"insecure"`
 
 	// WithoutMetadata disables automatic source-code metadata.
 	//
@@ -92,16 +92,16 @@ type Config struct {
 	// function, and line number associated with the operation.
 	//
 	// Disabling metadata can reduce runtime overhead and telemetry volume.
-	WithoutMetadata bool
+	WithoutMetadata bool `json:"without_metadata"`
 
 	// Tracer configures distributed tracing.
-	Tracer TracerConfig
+	Tracer TracerConfig `json:"tracer"`
 
 	// Meter configures metrics collection.
-	Meter MeterConfig
+	Meter MeterConfig `json:"meter"`
 
 	// Logger configures structured logging.
-	Logger LoggerConfig
+	Logger LoggerConfig `json:"logger"`
 }
 
 // TracerConfig configures distributed tracing.
@@ -114,13 +114,13 @@ type TracerConfig struct {
 	//	0.1  - sample approximately 10% of traces
 	//
 	// A value greater than zero enables tracing.
-	SamplingRatio float64
+	SamplingRatio float64 `json:"sampling_ratio"`
 }
 
 // MeterConfig configures metrics collection.
 type MeterConfig struct {
 	// Enabled determines whether metrics collection is enabled.
-	Enabled bool
+	Enabled bool `json:"enabled"`
 }
 
 // LoggerConfig configures structured logging.
@@ -137,11 +137,11 @@ type LoggerConfig struct {
 	//	fatal
 	//
 	// An empty value disables logging.
-	Severity string
+	Severity string `json:"severity"`
 
 	// Console determines whether log records are also written as structured
 	// JSON to the process's standard output.
-	Console bool
+	Console bool `json:"console"`
 }
 
 // Client initializes the OpenTelemetry client using the supplied
